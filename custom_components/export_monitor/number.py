@@ -7,6 +7,7 @@ from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfEnergy, UnitOfPower
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -61,6 +62,12 @@ class ExportMonitorNumber(CoordinatorEntity, NumberEntity):
         self._attr_unique_id = f"{entry.entry_id}_{key}"
         self._attr_name = name
         self._attr_icon = icon
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry.entry_id)},
+            name="Energy Export Monitor",
+            manufacturer="Energy Export Monitor",
+            model="v1",
+        )
 
     async def async_set_native_value(self, value: float) -> None:
         """Update the current value."""
