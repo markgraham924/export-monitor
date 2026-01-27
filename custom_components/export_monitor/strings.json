@@ -1,0 +1,53 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Energy Export Monitor Setup",
+        "description": "Configure the Energy Export Monitor integration to control your battery discharge based on grid export and solar forecast.",
+        "data": {
+          "discharge_button": "Alpha ESS Discharge Button",
+          "discharge_power": "Alpha ESS Discharge Power",
+          "discharge_cutoff_soc": "Alpha ESS Cutoff SOC",
+          "current_soc": "Current Battery SOC Sensor",
+          "grid_power": "Grid Power Sensor",
+          "current_pv": "Current PV Production Sensor",
+          "solcast_remaining": "Solcast Remaining Today Sensor",
+          "target_export": "Target Grid Export (W)",
+          "min_soc": "Minimum Battery SOC (%)",
+          "safety_margin": "Safety Margin (W)"
+        },
+        "data_description": {
+          "discharge_button": "Alpha ESS helper boolean entity that controls discharge (e.g., input_boolean.alphaess_helper_force_discharging)",
+          "discharge_power": "Alpha ESS discharge power control in kW (e.g., number.alphaess_template_force_discharging_power)",
+          "discharge_cutoff_soc": "Alpha ESS cutoff SOC control (e.g., number.alphaess_template_discharging_cutoff_soc)",
+          "current_soc": "Sensor showing current battery state of charge",
+          "grid_power": "Sensor showing grid power (negative when exporting)",
+          "current_pv": "Sensor showing current PV production in watts",
+          "solcast_remaining": "Solcast sensor for remaining forecast today in kWh",
+          "target_export": "Target maximum grid export power (typically 0)",
+          "min_soc": "Minimum battery SOC before discharge is disabled",
+          "safety_margin": "Additional margin to stay within T&C limits (default 500W = 0.5kWh)"
+        }
+      }
+    },
+    "error": {
+      "entity_not_found": "Selected entity not found or unavailable"
+    },
+    "abort": {
+      "already_configured": "This integration is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Energy Export Monitor Options",
+        "description": "Update the configuration options for Energy Export Monitor.",
+        "data": {
+          "target_export": "Target Grid Export (W)",
+          "min_soc": "Minimum Battery SOC (%)",
+          "safety_margin": "Safety Margin (W)"
+        }
+      }
+    }
+  }
+}

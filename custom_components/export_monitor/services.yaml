@@ -1,0 +1,32 @@
+start_discharge:
+  name: Start Discharge
+  description: Start discharging battery to grid to control export levels.
+  fields:
+    power:
+      name: Discharge Power
+      description: Power level to discharge in watts.
+      required: true
+      example: 3000
+      selector:
+        number:
+          min: 0
+          max: 10000
+          unit_of_measurement: "W"
+    cutoff_soc:
+      name: Cutoff SOC
+      description: Battery state of charge percentage to stop discharging at.
+      required: false
+      example: 20
+      selector:
+        number:
+          min: 0
+          max: 100
+          unit_of_measurement: "%"
+
+stop_discharge:
+  name: Stop Discharge
+  description: Stop discharging battery to grid.
+
+calculate_discharge:
+  name: Calculate Discharge
+  description: Recalculate discharge requirements based on current conditions.

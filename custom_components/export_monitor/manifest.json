@@ -1,0 +1,13 @@
+{
+  "domain": "export_monitor",
+  "name": "Energy Export Monitor",
+  "codeowners": ["@markg"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/markg/export-monitor",
+  "integration_type": "device",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/markg/export-monitor/issues",
+  "requirements": [],
+  "version": "1.0.0"
+}

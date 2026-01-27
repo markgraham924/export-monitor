@@ -1,0 +1,233 @@
+"""Config flow for Energy Export Monitor integration."""
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+import voluptuous as vol
+
+from homeassistant import config_entries
+from homeassistant.const import CONF_NAME
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import selector
+
+from .const import (
+    CONF_CURRENT_PV,
+    CONF_CURRENT_SOC,
+    CONF_DISCHARGE_BUTTON,
+    CONF_DISCHARGE_CUTOFF_SOC,
+    CONF_DISCHARGE_POWER,
+    CONF_GRID_POWER,
+    CONF_MIN_SOC,
+    CONF_SAFETY_MARGIN,
+    CONF_SOLCAST_REMAINING,
+    CONF_TARGET_EXPORT,
+    DEFAULT_MIN_SOC,
+    DEFAULT_SAFETY_MARGIN,
+    DEFAULT_TARGET_EXPORT,
+    DOMAIN,
+)
+
+_LOGGER = logging.getLogger(__name__)
+
+
+def _validate_entity(hass: HomeAssistant, entity_id: str) -> bool:
+    """Validate that entity exists and is available."""
+    state = hass.states.get(entity_id)
+    if state is None:
+        return False
+    if state.state in ["unknown", "unavailable"]:
+        _LOGGER.warning("Entity %s is %s", entity_id, state.state)
+        return False
+    return True
+
+
+class ExportMonitorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+    """Handle a config flow for Energy Export Monitor."""
+
+    VERSION = 1
+
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Handle the initial step."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            # Validate all required entities
+            for key in [
+                CONF_DISCHARGE_BUTTON,
+                CONF_DISCHARGE_POWER,
+                CONF_DISCHARGE_CUTOFF_SOC,
+                CONF_CURRENT_SOC,
+                CONF_GRID_POWER,
+                CONF_CURRENT_PV,
+                CONF_SOLCAST_REMAINING,
+            ]:
+                if not _validate_entity(self.hass, user_input[key]):
+                    errors[key] = "entity_not_found"
+
+            if not errors:
+                # Create entry
+                return self.async_create_entry(
+                    title="Energy Export Monitor",
+                    data=user_input,
+                )
+
+        # Define configuration schema
+        data_schema = vol.Schema(
+            {
+                vol.Required(CONF_DISCHARGE_BUTTON): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain=["input_boolean", "switch"],
+                    )
+                ),
+                vol.Required(CONF_DISCHARGE_POWER): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain=["number", "input_number"],
+                    )
+                ),
+                vol.Required(CONF_DISCHARGE_CUTOFF_SOC): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain=["number", "input_number"],
+                    )
+                ),
+                vol.Required(CONF_CURRENT_SOC): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain="sensor",
+                        device_class="battery",
+                    )
+                ),
+                vol.Required(CONF_GRID_POWER): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain="sensor",
+                        device_class="power",
+                    )
+                ),
+                vol.Required(CONF_CURRENT_PV): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain="sensor",
+                        device_class="power",
+                    )
+                ),
+                vol.Required(CONF_SOLCAST_REMAINING): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain="sensor",
+                    )
+                ),
+                vol.Optional(
+                    CONF_TARGET_EXPORT, default=DEFAULT_TARGET_EXPORT
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=10000,
+                        step=100,
+                        unit_of_measurement="W",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_MIN_SOC, default=DEFAULT_MIN_SOC
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=100,
+                        step=1,
+                        unit_of_measurement="%",
+                        mode=selector.NumberSelectorMode.SLIDER,
+                    )
+                ),
+                vol.Optional(
+                    CONF_SAFETY_MARGIN, default=DEFAULT_SAFETY_MARGIN
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=2000,
+                        step=100,
+                        unit_of_measurement="W",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+            }
+        )
+
+        return self.async_show_form(
+            step_id="user",
+            data_schema=data_schema,
+            errors=errors,
+        )
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> config_entries.OptionsFlow:
+        """Create the options flow."""
+        return OptionsFlowHandler(config_entry)
+
+
+class OptionsFlowHandler(config_entries.OptionsFlow):
+    """Handle options flow for the integration."""
+
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        """Initialize options flow."""
+        self.config_entry = config_entry
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Manage the options."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        # Get current values
+        current_data = {**self.config_entry.data, **self.config_entry.options}
+
+        options_schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_TARGET_EXPORT,
+                    default=current_data.get(CONF_TARGET_EXPORT, DEFAULT_TARGET_EXPORT),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=10000,
+                        step=100,
+                        unit_of_measurement="W",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_MIN_SOC,
+                    default=current_data.get(CONF_MIN_SOC, DEFAULT_MIN_SOC),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=100,
+                        step=1,
+                        unit_of_measurement="%",
+                        mode=selector.NumberSelectorMode.SLIDER,
+                    )
+                ),
+                vol.Optional(
+                    CONF_SAFETY_MARGIN,
+                    default=current_data.get(CONF_SAFETY_MARGIN, DEFAULT_SAFETY_MARGIN),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=2000,
+                        step=100,
+                        unit_of_measurement="W",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+            }
+        )
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=options_schema,
+            errors=errors,
+        )
