@@ -55,40 +55,77 @@ Increment for backward-compatible bug fixes:
 
 ## Workflow
 
-### 1. Make Your Changes
+We use a **feature branch + pull request** workflow for better release management and change tracking.
+
+### Development Workflow (Recommended)
+
+#### 1. Make Your Changes
 Edit code, test locally on your HA instance at 192.168.0.202.
 
-### 2. Update Version in manifest.json
+#### 2. Update Version in manifest.json
 Based on the change type, update `custom_components/export_monitor/manifest.json`:
 
 ```json
 {
-  "version": "1.0.2"  // Increment appropriately
+  "version": "1.0.3"  // Increment appropriately
 }
 ```
 
-### 3. Run Automation Script
+#### 3. Create Feature Branch and Push
 
 **PowerShell (Windows):**
 ```powershell
-.\sync-and-tag.ps1 -Message "Fixed entity control bug"
-```
-
-**Bash (Linux/Mac):**
-```bash
-./tag.sh "Fixed entity control bug"
+.\sync-and-tag.ps1 -Message "Fix entity control bug"
 ```
 
 The script will:
-1. ✓ Pull latest changes from GitHub
-2. ✓ Commit your changes with provided message
-3. ✓ Validate SemVer format
-4. ✓ Create annotated git tag (e.g., `v1.0.2`)
-5. ✓ Push commits and tags to GitHub
-6. ✓ (Optional) Sync to Home Assistant instance
+1. ✓ Create/checkout feature branch (e.g., `feature/fix-entity-control-bug`)
+2. ✓ Commit your changes
+3. ✓ Push branch to GitHub
+4. ✓ Show instructions for creating PR
 
-### 4. HACS Updates Automatically
-Once pushed, HACS will detect the new tag and offer it as an update to users.
+#### 4. Create Pull Request
+
+**Using GitHub CLI:**
+```powershell
+gh pr create --title "Fix entity control bug" --body "Fixes #123" --base main --head feature/fix-entity-control-bug
+```
+
+**Using GitHub Web:**
+Visit the link shown in script output, or go to GitHub → Pull Requests → New
+
+#### 5. Review and Merge PR
+
+Review the changes, ensure CI passes, then merge the PR on GitHub.
+
+#### 6. Tag the Release
+
+After PR is merged to main:
+
+```powershell
+.\sync-and-tag.ps1 -TagRelease
+```
+
+This will:
+1. ✓ Switch to main branch
+2. ✓ Pull latest changes
+3. ✓ Create git tag from manifest version (e.g., `v1.0.3`)
+4. ✓ Push tag to GitHub
+5. ✓ Trigger GitHub Actions to create release
+
+### Quick Workflow (Direct to Main)
+
+For hotfixes or when working solo (use sparingly):
+
+```powershell
+.\sync-and-tag.ps1 -Message "Hotfix for critical bug" -DirectToMain
+```
+
+This bypasses the PR workflow and commits directly to main with a tag.
+
+### After Release
+
+HACS will automatically detect the new tag and offer it as an update to users.
 
 ## Common Scenarios
 

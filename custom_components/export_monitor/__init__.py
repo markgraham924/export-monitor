@@ -278,8 +278,8 @@ async def async_setup_services(
         handle_start_discharge,
         schema=vol.Schema(
             {
-                vol.Required("duration", default=60): cv.positive_int   vol.Coerce(int), vol.Range(min=0, max=100)
-                ),
+                vol.Required("power"): cv.positive_int,
+                vol.Optional("duration", default=60): cv.positive_int,
             }
         ),
     )
