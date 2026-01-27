@@ -183,7 +183,118 @@ class ExportMonitorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.FlowResult:
         """Handle reconfiguration of entities."""
-        return await self._async_handle_step(user_input)
+        errors: dict[str, str] = {}
+
+        # Get the config entry being reconfigured
+        entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+        if entry is None:
+            return self.async_abort(reason="entry_not_found")
+
+        if user_input is not None:
+            # Validate all required entities
+            for key in [
+                CONF_DISCHARGE_BUTTON,
+                CONF_DISCHARGE_POWER,
+                CONF_DISCHARGE_CUTOFF_SOC,
+                CONF_CURRENT_SOC,
+                CONF_PV_ENERGY_TODAY,
+                CONF_GRID_FEED_TODAY,
+                CONF_SOLCAST_TOTAL_TODAY,
+            ]:
+                if not _validate_entity(self.hass, user_input[key]):
+                    errors[key] = "entity_not_found"
+
+            if not errors:
+                # Update the config entry with new data
+                self.hass.config_entries.async_update_entry(
+                    entry,
+                    data=user_input,
+                )
+                await self.hass.config_entries.async_reload(entry.entry_id)
+                return self.async_abort(reason="reconfigure_successful")
+
+        # Get current values from config entry
+        current_data = entry.data
+
+        data_schema = vol.Schema(
+            {
+                vol.Required(
+                    CONF_DISCHARGE_BUTTON,
+                    default=current_data.get(CONF_DISCHARGE_BUTTON),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain=["input_boolean", "switch"],
+                    )
+                ),
+                vol.Required(
+                    CONF_DISCHARGE_POWER,
+                    default=current_data.get(CONF_DISCHARGE_POWER),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain=["number", "input_number"],
+                    )
+                ),
+                vol.Required(
+                    CONF_DISCHARGE_CUTOFF_SOC,
+                    default=current_data.get(CONF_DISCHARGE_CUTOFF_SOC),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain=["number", "input_number"],
+                    )
+                ),
+                vol.Required(
+                    CONF_CURRENT_SOC,
+                    default=current_data.get(CONF_CURRENT_SOC),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain="sensor",
+                        device_class="battery",
+                    )
+                ),
+                vol.Required(
+                    CONF_PV_ENERGY_TODAY,
+                    default=current_data.get(CONF_PV_ENERGY_TODAY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain="sensor",
+                        device_class="energy",
+                    )
+                ),
+                vol.Required(
+                    CONF_GRID_FEED_TODAY,
+                    default=current_data.get(CONF_GRID_FEED_TODAY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain="sensor",
+                        device_class="energy",
+                    )
+                ),
+                vol.Required(
+                    CONF_SOLCAST_TOTAL_TODAY,
+                    default=current_data.get(CONF_SOLCAST_TOTAL_TODAY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain="sensor",
+                        device_class="energy",
+                    )
+                ),
+                vol.Optional(
+                    CONF_SOLCAST_FORECAST_SO_FAR,
+                    default=current_data.get(CONF_SOLCAST_FORECAST_SO_FAR),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain="sensor",
+                        device_class="energy",
+                    )
+                ),
+            }
+        )
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=data_schema,
+            errors=errors,
+        )
 
 
 class OptionsFlowHandler(config_entries.OptionsFlow):
