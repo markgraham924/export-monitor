@@ -28,7 +28,7 @@ DEFAULT_TARGET_EXPORT: Final = 0  # Watts
 DEFAULT_OBSERVE_RESERVE_SOC: Final = False  # Disabled by default
 DEFAULT_MIN_SOC: Final = 20  # Percent
 DEFAULT_SAFETY_MARGIN: Final = 0.5  # kWh (0.5 kWh margin)
-DEFAULT_SCAN_INTERVAL: Final = 30  # Seconds
+DEFAULT_SCAN_INTERVAL: Final = 10  # Seconds
 
 # Attributes
 ATTR_EXPORT_HEADROOM: Final = "export_headroom_kwh"
