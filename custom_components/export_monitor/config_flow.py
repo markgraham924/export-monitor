@@ -17,12 +17,15 @@ from .const import (
     CONF_DISCHARGE_POWER,
     CONF_GRID_FEED_TODAY,
     CONF_MIN_SOC,
+    CONF_OBSERVE_RESERVE_SOC,
     CONF_PV_ENERGY_TODAY,
+    CONF_RESERVE_SOC_SENSOR,
     CONF_SAFETY_MARGIN,
     CONF_SOLCAST_FORECAST_SO_FAR,
     CONF_SOLCAST_TOTAL_TODAY,
     CONF_TARGET_EXPORT,
     DEFAULT_MIN_SOC,
+    DEFAULT_OBSERVE_RESERVE_SOC,
     DEFAULT_SAFETY_MARGIN,
     DEFAULT_TARGET_EXPORT,
     DOMAIN,
@@ -162,6 +165,14 @@ class ExportMonitorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         mode=selector.NumberSelectorMode.BOX,
                     )
                 ),
+                vol.Optional(CONF_RESERVE_SOC_SENSOR): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain="sensor",
+                    )
+                ),
+                vol.Optional(
+                    CONF_OBSERVE_RESERVE_SOC, default=DEFAULT_OBSERVE_RESERVE_SOC
+                ): selector.BooleanSelector(),
             }
         )
 
@@ -354,6 +365,18 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                         mode=selector.NumberSelectorMode.BOX,
                     )
                 ),
+                vol.Optional(
+                    CONF_RESERVE_SOC_SENSOR,
+                    default=current_data.get(CONF_RESERVE_SOC_SENSOR),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain="sensor",
+                    )
+                ),
+                vol.Optional(
+                    CONF_OBSERVE_RESERVE_SOC,
+                    default=current_data.get(CONF_OBSERVE_RESERVE_SOC, DEFAULT_OBSERVE_RESERVE_SOC),
+                ): selector.BooleanSelector(),
             }
         )
 

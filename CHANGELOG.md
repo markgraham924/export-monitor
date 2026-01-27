@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-01-27
+
+### Added
+- Reserve SOC monitoring feature to protect battery from excessive discharge
+- Optional `reserve_soc_sensor` configuration field to specify sensor with end-of-day reserve target
+- `observe_reserve_soc` toggle to enable/disable reserve monitoring (default: disabled)
+- Automatic discharge stop when current SOC drops below reserve target
+- New sensors: `reserve_soc_target` (%) and `reserve_soc_status` (monitoring status)
+- Auto-stop callback mechanism in coordinator to stop discharge when reserve limit reached
+
+### Changed
+- Config flow now includes optional reserve SOC sensor selection
+- Coordinator monitors reserve SOC during discharge if configured
+- Enhanced logging for reserve limit events
+
+### Use Case
+- For users with sensors that predict required battery reserve for end of day
+- Prevents battery discharge below the minimum needed for evening/night usage
+- Automatically stops discharge when reserve limit is reached
+
+### Example
+- Configure `sensor.battery_soc_reserve_target` (updates hourly with required reserve)
+- Enable `observe_reserve_soc` toggle
+- During discharge, if current SOC drops below reserve target, discharge automatically stops
+- Status sensors show reserve target, monitoring state, and limit reached status
+
 ## [1.1.0] - 2026-01-27
 
 ### Added

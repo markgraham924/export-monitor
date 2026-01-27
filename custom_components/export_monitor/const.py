@@ -15,6 +15,8 @@ CONF_SOLCAST_FORECAST_SO_FAR: Final = "solcast_forecast_so_far"
 CONF_TARGET_EXPORT: Final = "target_export"
 CONF_MIN_SOC: Final = "min_soc"
 CONF_SAFETY_MARGIN: Final = "safety_margin"
+CONF_RESERVE_SOC_SENSOR: Final = "reserve_soc_sensor"  # Optional
+CONF_OBSERVE_RESERVE_SOC: Final = "observe_reserve_soc"  # Boolean
 
 # Service names
 SERVICE_START_DISCHARGE: Final = "start_discharge"
@@ -23,6 +25,7 @@ SERVICE_CALCULATE_DISCHARGE: Final = "calculate_discharge"
 
 # Default values
 DEFAULT_TARGET_EXPORT: Final = 0  # Watts
+DEFAULT_OBSERVE_RESERVE_SOC: Final = False  # Disabled by default
 DEFAULT_MIN_SOC: Final = 20  # Percent
 DEFAULT_SAFETY_MARGIN: Final = 0.5  # kWh (0.5 kWh margin)
 DEFAULT_SCAN_INTERVAL: Final = 30  # Seconds
