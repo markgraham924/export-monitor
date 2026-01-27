@@ -202,7 +202,8 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                     headroom_kwh, target_export
                 )
             else:
-                # Fallback: assume 1 hour if no target_export configured
+                # If no target_export configured, calculate based on headroom
+                # Assume we want to discharge over 1 hour
                 recommended_discharge_w = headroom_kwh * 1000
                 calculated_duration_minutes = 60.0
         
@@ -221,16 +222,28 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                     self._discharge_target_energy,
                 )
         
-        # Check if discharge should be stopped due to reserve limit
-        if self._discharge_active and reserve_limit_reached:
-            _LOGGER.warning(
-                "Stopping discharge: reserve SOC limit reached (%.1f%% < %.1f%%)",
-                current_soc,
-                reserve_soc_target if reserve_soc_target else 0,
-            )
-            # Trigger stop discharge callback if set
-            if self._stop_discharge_callback:
-                self.hass.async_create_task(self._stop_discharge_callback())
+        # Auto-stop discharge if any limit is reached
+        should_stop_discharge = False
+        stop_reason = ""
+        
+        if self._discharge_active:
+            # Check headroom exhausted (most critical - prevents export limit breach)
+            if headroom_kwh <= 0:
+                should_stop_discharge = True
+                stop_reason = f"Export headroom exhausted ({headroom_kwh:.3f} kWh)"
+            # Check discharge target reached
+            elif discharge_complete:
+                should_stop_discharge = True
+                stop_reason = "Discharge target reached"
+            # Check reserve SOC limit
+            elif reserve_limit_reached:
+                should_stop_discharge = True
+                stop_reason = f"Reserve SOC limit reached ({current_soc:.1f}% < {reserve_soc_target:.1f}%)"
+            
+            if should_stop_discharge:
+                _LOGGER.warning("Auto-stopping discharge: %s", stop_reason)
+                if self._stop_discharge_callback:
+                    self.hass.async_create_task(self._stop_discharge_callback())
 
         return {
             ATTR_EXPORT_HEADROOM: headroom_kwh,
