@@ -53,6 +53,10 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
         )
         self.entry = entry
         self._discharge_active = False
+        self._discharge_start_export = None  # Grid export when discharge started
+        self._discharge_target_energy = None  # Energy to discharge (kWh)
+        self._discharge_start_time = None  # When discharge started
+        self._calculated_duration = None  # Calculated discharge duration (minutes)
 
     def _get_sensor_value(self, entity_id: str) -> float | None:
         """Get sensor value as float."""
@@ -84,6 +88,47 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
             grid_feed_today,
         )
         return export_cap, headroom
+
+    def _calculate_discharge_duration(
+        self,
+        headroom_kwh: float,
+        target_export_w: float,
+        background_load_buffer: float = 0.1,
+    ) -> float:
+        """Calculate discharge duration in minutes.
+        
+        Args:
+            headroom_kwh: Energy headroom available (kWh)
+            target_export_w: Target export power (W)
+            background_load_buffer: Buffer factor for background load (default 10%)
+            
+        Returns:
+            Duration in minutes
+        """
+        if target_export_w <= 0 or headroom_kwh <= 0:
+            return 0.0
+        
+        # Convert target export to kW
+        target_export_kw = target_export_w / 1000
+        
+        # Calculate base duration in hours, then convert to minutes
+        base_duration_hours = headroom_kwh / target_export_kw
+        
+        # Add buffer for background load (increases duration)
+        duration_with_buffer_hours = base_duration_hours * (1 + background_load_buffer)
+        
+        # Convert to minutes
+        duration_minutes = duration_with_buffer_hours * 60
+        
+        _LOGGER.debug(
+            "Calculated discharge duration: %.1f minutes (headroom: %.3f kWh, target: %.0f W, buffer: %.0f%%)",
+            duration_minutes,
+            headroom_kwh,
+            target_export_w,
+            background_load_buffer * 100,
+        )
+        
+        return round(duration_minutes, 1)
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from sensors and calculate discharge requirements."""
@@ -124,10 +169,37 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
             safety_margin,
         )
 
-        # Recommended discharge power assumes 1 hour window
+        # Calculate discharge power and duration
         recommended_discharge_w = 0.0
+        calculated_duration_minutes = 0.0
+        
         if current_soc > min_soc and headroom_kwh > 0:
-            recommended_discharge_w = headroom_kwh * 1000
+            if target_export > 0:
+                # Use target_export as the discharge power
+                recommended_discharge_w = target_export
+                # Calculate duration based on headroom and target power
+                calculated_duration_minutes = self._calculate_discharge_duration(
+                    headroom_kwh, target_export
+                )
+            else:
+                # Fallback: assume 1 hour if no target_export configured
+                recommended_discharge_w = headroom_kwh * 1000
+                calculated_duration_minutes = 60.0
+        
+        # Store calculated duration for service use
+        self._calculated_duration = calculated_duration_minutes
+        
+        # Check if discharge is active and we've exported enough
+        discharge_complete = False
+        if self._discharge_active and self._discharge_start_export is not None:
+            energy_exported_since_start = grid_feed_today - self._discharge_start_export
+            if self._discharge_target_energy and energy_exported_since_start >= self._discharge_target_energy:
+                discharge_complete = True
+                _LOGGER.info(
+                    "Discharge target reached: exported %.3f kWh (target: %.3f kWh)",
+                    energy_exported_since_start,
+                    self._discharge_target_energy,
+                )
 
         return {
             ATTR_EXPORT_HEADROOM: headroom_kwh,
@@ -143,6 +215,8 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
             "min_soc": min_soc,
             "target_export": target_export,
             "solcast_forecast_so_far": solcast_forecast_so_far_value,
+            "calculated_duration": calculated_duration_minutes,
+            "discharge_complete": discharge_complete,
         }
 
     @property
@@ -150,7 +224,28 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
         """Return if discharge is currently active."""
         return self._discharge_active
 
-    def set_discharge_active(self, active: bool) -> None:
-        """Set discharge active state."""
+    def set_discharge_active(self, active: bool, grid_export: float | None = None, target_energy: float | None = None) -> None:
+        """Set discharge active state and tracking parameters.
+        
+        Args:
+            active: Whether discharge is active
+            grid_export: Current grid export when starting (kWh)
+            target_energy: Target energy to discharge (kWh)
+        """
         self._discharge_active = active
+        if active:
+            self._discharge_start_export = grid_export
+            self._discharge_target_energy = target_energy
+            import datetime
+            self._discharge_start_time = datetime.datetime.now()
+            _LOGGER.info(
+                "Discharge started: initial export %.3f kWh, target %.3f kWh",
+                grid_export if grid_export else 0,
+                target_energy if target_energy else 0,
+            )
+        else:
+            self._discharge_start_export = None
+            self._discharge_target_energy = None
+            self._discharge_start_time = None
+            _LOGGER.info("Discharge stopped")
         _LOGGER.info("Discharge active state set to: %s", active)

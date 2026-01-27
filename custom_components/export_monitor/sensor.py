@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import logging
+from typing import Any
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -44,6 +45,8 @@ async def async_setup_entry(
             DischargeNeededSensor(coordinator, entry),
             ExportedTodaySensor(coordinator, entry),
             DischargeStatusSensor(coordinator, entry),
+            CalculatedDurationSensor(coordinator, entry),
+            DischargeCompleteSensor(coordinator, entry),
         ]
     )
 
@@ -105,7 +108,7 @@ class ExportHeadroomSensor(ExportMonitorSensor):
         return None
 
     @property
-    def extra_state_attributes(self) -> dict[str, any]:
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional attributes."""
         if not self.coordinator.data:
             return {}
@@ -146,7 +149,7 @@ class DischargeNeededSensor(ExportMonitorSensor):
         return None
 
     @property
-    def extra_state_attributes(self) -> dict[str, any]:
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional attributes."""
         if not self.coordinator.data:
             return {}
@@ -217,7 +220,7 @@ class DischargeStatusSensor(ExportMonitorSensor):
         return "Idle"
 
     @property
-    def extra_state_attributes(self) -> dict[str, any]:
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional attributes."""
         if not self.coordinator.data:
             return {}
@@ -226,3 +229,62 @@ class DischargeStatusSensor(ExportMonitorSensor):
             ATTR_EXPORT_HEADROOM: self.coordinator.data.get(ATTR_EXPORT_HEADROOM),
             ATTR_EXPORT_ALLOWED: self.coordinator.data.get(ATTR_EXPORT_ALLOWED),
         }
+
+
+class CalculatedDurationSensor(ExportMonitorSensor):
+    """Sensor showing calculated discharge duration in minutes."""
+
+    _attr_native_unit_of_measurement = "min"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(
+        self,
+        coordinator: ExportMonitorCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        """Initialize the calculated duration sensor."""
+        super().__init__(
+            coordinator,
+            entry,
+            "calculated_duration",
+            "Calculated Duration",
+            "mdi:timer",
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the calculated discharge duration in minutes."""
+        if self.coordinator.data:
+            return self.coordinator.data.get("calculated_duration")
+        return None
+
+
+class DischargeCompleteSensor(ExportMonitorSensor):
+    """Sensor showing if discharge target has been reached."""
+
+    def __init__(
+        self,
+        coordinator: ExportMonitorCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        """Initialize the discharge complete sensor."""
+        super().__init__(
+            coordinator,
+            entry,
+            "discharge_complete",
+            "Discharge Complete",
+            "mdi:check-circle",
+        )
+
+    @property
+    def native_value(self) -> str:
+        """Return whether discharge is complete."""
+        if not self.coordinator.data:
+            return "Unknown"
+        
+        if self.coordinator.data.get("discharge_complete", False):
+            return "Complete"
+        elif self.coordinator.discharge_active:
+            return "In Progress"
+        else:
+            return "Not Started"
