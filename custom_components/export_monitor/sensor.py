@@ -47,6 +47,8 @@ async def async_setup_entry(
             DischargeStatusSensor(coordinator, entry),
             CalculatedDurationSensor(coordinator, entry),
             DischargeCompleteSensor(coordinator, entry),
+            ReserveSOCTargetSensor(coordinator, entry),
+            ReserveSOCStatusSensor(coordinator, entry),
         ]
     )
 
@@ -288,3 +290,83 @@ class DischargeCompleteSensor(ExportMonitorSensor):
             return "In Progress"
         else:
             return "Not Started"
+
+
+class ReserveSOCTargetSensor(ExportMonitorSensor):
+    """Sensor showing reserve SOC target value."""
+
+    _attr_native_unit_of_measurement = "%"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(
+        self,
+        coordinator: ExportMonitorCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        """Initialize the reserve SOC target sensor."""
+        super().__init__(
+            coordinator,
+            entry,
+            "reserve_soc_target",
+            "Reserve SOC Target",
+            "mdi:battery-lock",
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the reserve SOC target value."""
+        if self.coordinator.data:
+            return self.coordinator.data.get("reserve_soc_target")
+        return None
+
+    @property
+    def available(self) -> bool:
+        """Return if entity is available."""
+        return self.coordinator.last_update_success and self.coordinator.data.get("reserve_soc_target") is not None
+
+
+class ReserveSOCStatusSensor(ExportMonitorSensor):
+    """Sensor showing reserve SOC monitoring status."""
+
+    def __init__(
+        self,
+        coordinator: ExportMonitorCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        """Initialize the reserve SOC status sensor."""
+        super().__init__(
+            coordinator,
+            entry,
+            "reserve_soc_status",
+            "Reserve SOC Status",
+            "mdi:shield-alert",
+        )
+
+    @property
+    def native_value(self) -> str:
+        """Return the reserve SOC monitoring status."""
+        if not self.coordinator.data:
+            return "Unknown"
+        
+        observe_reserve = self.coordinator.data.get("observe_reserve_soc", False)
+        if not observe_reserve:
+            return "Monitoring Disabled"
+        
+        reserve_limit_reached = self.coordinator.data.get("reserve_limit_reached", False)
+        if reserve_limit_reached:
+            return "Limit Reached"
+        else:
+            return "Normal"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional attributes."""
+        if not self.coordinator.data:
+            return {}
+
+        return {
+            "reserve_soc_target": self.coordinator.data.get("reserve_soc_target"),
+            "current_soc": self.coordinator.data.get("current_soc"),
+            "observe_reserve_soc": self.coordinator.data.get("observe_reserve_soc"),
+            "reserve_limit_reached": self.coordinator.data.get("reserve_limit_reached"),
+        }

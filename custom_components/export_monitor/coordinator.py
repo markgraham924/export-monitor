@@ -21,12 +21,15 @@ from .const import (
     CONF_CURRENT_SOC,
     CONF_GRID_FEED_TODAY,
     CONF_MIN_SOC,
+    CONF_OBSERVE_RESERVE_SOC,
     CONF_PV_ENERGY_TODAY,
+    CONF_RESERVE_SOC_SENSOR,
     CONF_SAFETY_MARGIN,
     CONF_SOLCAST_FORECAST_SO_FAR,
     CONF_SOLCAST_TOTAL_TODAY,
     CONF_TARGET_EXPORT,
     DEFAULT_MIN_SOC,
+    DEFAULT_OBSERVE_RESERVE_SOC,
     DEFAULT_SAFETY_MARGIN,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_TARGET_EXPORT,
@@ -57,6 +60,7 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
         self._discharge_target_energy = None  # Energy to discharge (kWh)
         self._discharge_start_time = None  # When discharge started
         self._calculated_duration = None  # Calculated discharge duration (minutes)
+        self._stop_discharge_callback = None  # Callback to stop discharge
 
     def _get_sensor_value(self, entity_id: str) -> float | None:
         """Get sensor value as float."""
@@ -160,6 +164,22 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
         target_export = config_data.get(CONF_TARGET_EXPORT, DEFAULT_TARGET_EXPORT)
         min_soc = config_data.get(CONF_MIN_SOC, DEFAULT_MIN_SOC)
         safety_margin = config_data.get(CONF_SAFETY_MARGIN, DEFAULT_SAFETY_MARGIN)
+        
+        # Get reserve SOC configuration
+        reserve_soc_sensor = config_data.get(CONF_RESERVE_SOC_SENSOR)
+        observe_reserve_soc = config_data.get(CONF_OBSERVE_RESERVE_SOC, DEFAULT_OBSERVE_RESERVE_SOC)
+        reserve_soc_target = None
+        reserve_limit_reached = False
+        
+        if reserve_soc_sensor and observe_reserve_soc:
+            reserve_soc_target = self._get_sensor_value(reserve_soc_sensor)
+            if reserve_soc_target is not None and current_soc < reserve_soc_target:
+                reserve_limit_reached = True
+                _LOGGER.warning(
+                    "Reserve SOC limit reached: current %.1f%% < reserve target %.1f%%",
+                    current_soc,
+                    reserve_soc_target,
+                )
 
         # Calculate export cap and headroom (kWh)
         export_cap_kwh, headroom_kwh = self._calculate_export_headroom(
@@ -200,6 +220,17 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                     energy_exported_since_start,
                     self._discharge_target_energy,
                 )
+        
+        # Check if discharge should be stopped due to reserve limit
+        if self._discharge_active and reserve_limit_reached:
+            _LOGGER.warning(
+                "Stopping discharge: reserve SOC limit reached (%.1f%% < %.1f%%)",
+                current_soc,
+                reserve_soc_target if reserve_soc_target else 0,
+            )
+            # Trigger stop discharge callback if set
+            if self._stop_discharge_callback:
+                self.hass.async_create_task(self._stop_discharge_callback())
 
         return {
             ATTR_EXPORT_HEADROOM: headroom_kwh,
@@ -217,6 +248,9 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
             "solcast_forecast_so_far": solcast_forecast_so_far_value,
             "calculated_duration": calculated_duration_minutes,
             "discharge_complete": discharge_complete,
+            "reserve_soc_target": reserve_soc_target,
+            "reserve_limit_reached": reserve_limit_reached,
+            "observe_reserve_soc": observe_reserve_soc,
         }
 
     @property
@@ -248,4 +282,8 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
             self._discharge_target_energy = None
             self._discharge_start_time = None
             _LOGGER.info("Discharge stopped")
-        _LOGGER.info("Discharge active state set to: %s", active)
+    
+    def set_stop_discharge_callback(self, callback) -> None:
+        """Set callback to be called when discharge should be stopped."""
+        self._stop_discharge_callback = callback
+
