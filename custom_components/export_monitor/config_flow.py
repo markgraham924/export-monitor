@@ -51,6 +51,17 @@ class ExportMonitorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.FlowResult:
         """Handle the initial step."""
+        return await self._async_handle_step(user_input)
+
+    async def async_step_import(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Handle YAML import."""
+        return await self._async_handle_step(user_input)
+
+    async def _async_handle_step(
+        self, user_input: dict[str, Any] | None
+    ) -> config_entries.FlowResult:
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -60,7 +71,6 @@ class ExportMonitorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_DISCHARGE_POWER,
                 CONF_DISCHARGE_CUTOFF_SOC,
                 CONF_CURRENT_SOC,
-                CONF_GRID_POWER,
                 CONF_PV_ENERGY_TODAY,
                 CONF_GRID_FEED_TODAY,
                 CONF_SOLCAST_TOTAL_TODAY,
@@ -69,13 +79,11 @@ class ExportMonitorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     errors[key] = "entity_not_found"
 
             if not errors:
-                # Create entry
                 return self.async_create_entry(
                     title="Energy Export Monitor",
                     data=user_input,
                 )
 
-        # Define configuration schema
         data_schema = vol.Schema(
             {
                 vol.Required(CONF_DISCHARGE_BUTTON): selector.EntitySelector(

@@ -5,6 +5,7 @@ import logging
 
 import voluptuous as vol
 
+from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -15,8 +16,16 @@ from .const import (
     CONF_DISCHARGE_BUTTON,
     CONF_DISCHARGE_CUTOFF_SOC,
     CONF_DISCHARGE_POWER,
+    CONF_GRID_FEED_TODAY,
     CONF_MIN_SOC,
+    CONF_PV_ENERGY_TODAY,
+    CONF_SAFETY_MARGIN,
+    CONF_SOLCAST_FORECAST_SO_FAR,
+    CONF_SOLCAST_TOTAL_TODAY,
+    CONF_TARGET_EXPORT,
     DEFAULT_MIN_SOC,
+    DEFAULT_SAFETY_MARGIN,
+    DEFAULT_TARGET_EXPORT,
     DOMAIN,
     SERVICE_CALCULATE_DISCHARGE,
     SERVICE_START_DISCHARGE,
@@ -61,6 +70,58 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN].pop(entry.entry_id)
 
     return unload_ok
+
+
+# YAML configuration support (import flow)
+CONFIG_SCHEMA = vol.Schema(
+    {
+        DOMAIN: vol.All(
+            cv.ensure_list,
+            [
+                vol.Schema(
+                    {
+                        vol.Required(CONF_DISCHARGE_BUTTON): cv.entity_id,
+                        vol.Required(CONF_DISCHARGE_POWER): cv.entity_id,
+                        vol.Required(CONF_DISCHARGE_CUTOFF_SOC): cv.entity_id,
+                        vol.Required(CONF_CURRENT_SOC): cv.entity_id,
+                        vol.Required(CONF_PV_ENERGY_TODAY): cv.entity_id,
+                        vol.Required(CONF_GRID_FEED_TODAY): cv.entity_id,
+                        vol.Required(CONF_SOLCAST_TOTAL_TODAY): cv.entity_id,
+                        vol.Optional(CONF_SOLCAST_FORECAST_SO_FAR): cv.entity_id,
+                        vol.Optional(CONF_TARGET_EXPORT, default=DEFAULT_TARGET_EXPORT): cv.positive_int,
+                        vol.Optional(CONF_MIN_SOC, default=DEFAULT_MIN_SOC): vol.All(
+                            vol.Coerce(int), vol.Range(min=0, max=100)
+                        ),
+                        vol.Optional(CONF_SAFETY_MARGIN, default=DEFAULT_SAFETY_MARGIN): vol.Coerce(float),
+                    }
+                )
+            ],
+        )
+    },
+    extra=vol.ALLOW_EXTRA,
+)
+
+
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Set up integration via YAML by importing into config entries."""
+    if DOMAIN not in config:
+        return True
+
+    for entry_conf in config[DOMAIN]:
+        # Prevent duplicate imports
+        existing = hass.config_entries.async_entries(DOMAIN)
+        if any(e.data.get(CONF_DISCHARGE_BUTTON) == entry_conf[CONF_DISCHARGE_BUTTON] for e in existing):
+            continue
+
+        hass.async_create_task(
+            hass.config_entries.flow.async_init(
+                DOMAIN,
+                context={"source": config_entries.SOURCE_IMPORT},
+                data=entry_conf,
+            )
+        )
+
+    return True
 
 
 async def async_setup_services(
