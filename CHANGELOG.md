@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2] - 2026-01-27
+
+### Fixed
+- **Critical**: OptionsFlow config_entry property setter error causing UI crash
+- Removed custom `__init__` from OptionsFlowHandler that attempted to set read-only property
+- Integration no longer crashes when accessing options in Home Assistant UI
+
+### Technical Details
+- Home Assistant's `OptionsFlow` base class automatically manages `config_entry` property
+- Custom initialization was redundant and conflicted with read-only property definition
+
 ## [1.2.1] - 2026-01-27
 
 ### Fixed
