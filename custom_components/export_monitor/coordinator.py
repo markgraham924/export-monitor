@@ -12,18 +12,19 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .const import (
     ATTR_CURRENT_PV,
-    ATTR_CURRENT_THRESHOLD,
     ATTR_DISCHARGE_NEEDED,
+    ATTR_EXPORT_ALLOWED,
+    ATTR_EXPORT_HEADROOM,
+    ATTR_EXPORTED_TODAY,
     ATTR_FORECAST_PV,
-    ATTR_GRID_EXPORT,
     ATTR_LAST_CALCULATION,
-    ATTR_SAFE_EXPORT_LIMIT,
-    CONF_CURRENT_PV,
     CONF_CURRENT_SOC,
-    CONF_GRID_POWER,
+    CONF_GRID_FEED_TODAY,
     CONF_MIN_SOC,
+    CONF_PV_ENERGY_TODAY,
     CONF_SAFETY_MARGIN,
-    CONF_SOLCAST_REMAINING,
+    CONF_SOLCAST_FORECAST_SO_FAR,
+    CONF_SOLCAST_TOTAL_TODAY,
     CONF_TARGET_EXPORT,
     DEFAULT_MIN_SOC,
     DEFAULT_SAFETY_MARGIN,
@@ -66,83 +67,48 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
             _LOGGER.error("Cannot convert %s state to float: %s", entity_id, err)
             return None
 
-    def _calculate_safe_export_limit(
+    def _calculate_export_headroom(
         self,
-        current_pv: float,
-        forecast_pv: float,
-        safety_margin: float,
-    ) -> float:
-        """
-        Calculate safe export limit.
-        
-        Returns the maximum allowed grid export in watts, calculated as:
-        max(current_pv, forecast_pv) + safety_margin
-        """
-        base_limit = max(current_pv, forecast_pv)
-        safe_limit = base_limit + safety_margin
+        pv_energy_today: float,
+        solcast_total_today: float,
+        grid_feed_today: float,
+        safety_margin_kwh: float,
+    ) -> tuple[float, float]:
+        """Calculate export allowance and remaining headroom (kWh)."""
+        export_cap = max(pv_energy_today, solcast_total_today) + safety_margin_kwh
+        headroom = export_cap - grid_feed_today
         _LOGGER.debug(
-            "Safe export limit: %.0f W (PV: %.0f W, Forecast: %.0f W, Margin: %.0f W)",
-            safe_limit,
-            current_pv,
-            forecast_pv,
-            safety_margin,
+            "Export headroom: %.3f kWh (cap: %.3f kWh, exported: %.3f kWh)",
+            headroom,
+            export_cap,
+            grid_feed_today,
         )
-        return safe_limit
-
-    def _calculate_discharge_needed(
-        self,
-        grid_power: float,
-        safe_export_limit: float,
-        current_soc: float,
-        min_soc: float,
-    ) -> float:
-        """
-        Calculate discharge power needed.
-        
-        Returns the amount of discharge power (in watts) needed to stay within
-        the safe export limit. Returns 0 if no discharge needed or battery too low.
-        
-        Note: grid_power is negative when exporting to grid.
-        """
-        # Check if battery has enough charge
-        if current_soc <= min_soc:
-            _LOGGER.debug("Battery SOC (%.1f%%) at or below minimum (%.1f%%)", current_soc, min_soc)
-            return 0
-
-        # Calculate current grid export (make positive for easier logic)
-        current_export = abs(grid_power) if grid_power < 0 else 0
-
-        # Check if we're exceeding the safe limit
-        if current_export <= safe_export_limit:
-            _LOGGER.debug(
-                "Current export (%.0f W) within safe limit (%.0f W)",
-                current_export,
-                safe_export_limit,
-            )
-            return 0
-
-        # Calculate how much we need to discharge to stay within limit
-        discharge_needed = current_export - safe_export_limit
-        _LOGGER.info(
-            "Discharge needed: %.0f W (Export: %.0f W, Limit: %.0f W)",
-            discharge_needed,
-            current_export,
-            safe_export_limit,
-        )
-        return discharge_needed
+        return export_cap, headroom
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from sensors and calculate discharge requirements."""
         config_data = {**self.entry.data, **self.entry.options}
 
-        # Get sensor values
+        # Get sensor values (kWh)
         current_soc = self._get_sensor_value(config_data[CONF_CURRENT_SOC])
-        grid_power = self._get_sensor_value(config_data[CONF_GRID_POWER])
-        current_pv = self._get_sensor_value(config_data[CONF_CURRENT_PV])
-        solcast_remaining = self._get_sensor_value(config_data[CONF_SOLCAST_REMAINING])
+        pv_energy_today = self._get_sensor_value(config_data[CONF_PV_ENERGY_TODAY])
+        grid_feed_today = self._get_sensor_value(config_data[CONF_GRID_FEED_TODAY])
+        solcast_total_today = self._get_sensor_value(config_data[CONF_SOLCAST_TOTAL_TODAY])
+        solcast_forecast_so_far = config_data.get(CONF_SOLCAST_FORECAST_SO_FAR)
+        solcast_forecast_so_far_value = (
+            self._get_sensor_value(solcast_forecast_so_far)
+            if solcast_forecast_so_far
+            else None
+        )
 
         # Check for missing values
-        if any(v is None for v in [current_soc, grid_power, current_pv, solcast_remaining]):
+        required_values = [
+            current_soc,
+            pv_energy_today,
+            grid_feed_today,
+            solcast_total_today,
+        ]
+        if any(v is None for v in required_values):
             raise UpdateFailed("One or more sensors unavailable")
 
         # Get configuration values
@@ -150,40 +116,33 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
         min_soc = config_data.get(CONF_MIN_SOC, DEFAULT_MIN_SOC)
         safety_margin = config_data.get(CONF_SAFETY_MARGIN, DEFAULT_SAFETY_MARGIN)
 
-        # Convert Solcast remaining forecast from kWh to W (assuming over 1 hour)
-        forecast_pv_watts = solcast_remaining * 1000
-
-        # Calculate safe export limit
-        safe_export_limit = self._calculate_safe_export_limit(
-            current_pv,
-            forecast_pv_watts,
+        # Calculate export cap and headroom (kWh)
+        export_cap_kwh, headroom_kwh = self._calculate_export_headroom(
+            pv_energy_today,
+            solcast_total_today,
+            grid_feed_today,
             safety_margin,
         )
 
-        # Calculate discharge needed
-        discharge_needed = self._calculate_discharge_needed(
-            grid_power,
-            safe_export_limit,
-            current_soc,
-            min_soc,
-        )
-
-        # Calculate current grid export (positive value)
-        current_export = abs(grid_power) if grid_power < 0 else 0
+        # Recommended discharge power assumes 1 hour window
+        recommended_discharge_w = 0.0
+        if current_soc > min_soc and headroom_kwh > 0:
+            recommended_discharge_w = headroom_kwh * 1000
 
         return {
-            ATTR_CURRENT_THRESHOLD: safe_export_limit,
-            ATTR_GRID_EXPORT: current_export,
-            ATTR_DISCHARGE_NEEDED: discharge_needed,
-            ATTR_SAFE_EXPORT_LIMIT: safe_export_limit,
-            ATTR_CURRENT_PV: current_pv,
-            ATTR_FORECAST_PV: forecast_pv_watts,
+            ATTR_EXPORT_HEADROOM: headroom_kwh,
+            ATTR_EXPORT_ALLOWED: export_cap_kwh,
+            ATTR_EXPORTED_TODAY: grid_feed_today,
+            ATTR_DISCHARGE_NEEDED: recommended_discharge_w,
+            ATTR_CURRENT_PV: pv_energy_today,
+            ATTR_FORECAST_PV: solcast_total_today,
             ATTR_LAST_CALCULATION: self.hass.states.get("sensor.date_time_iso").state
             if self.hass.states.get("sensor.date_time_iso")
             else None,
             "current_soc": current_soc,
             "min_soc": min_soc,
             "target_export": target_export,
+            "solcast_forecast_so_far": solcast_forecast_so_far_value,
         }
 
     @property

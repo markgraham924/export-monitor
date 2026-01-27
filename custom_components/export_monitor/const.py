@@ -8,9 +8,10 @@ CONF_DISCHARGE_BUTTON: Final = "discharge_button"
 CONF_DISCHARGE_POWER: Final = "discharge_power"
 CONF_DISCHARGE_CUTOFF_SOC: Final = "discharge_cutoff_soc"
 CONF_CURRENT_SOC: Final = "current_soc"
-CONF_GRID_POWER: Final = "grid_power"
-CONF_CURRENT_PV: Final = "current_pv"
-CONF_SOLCAST_REMAINING: Final = "solcast_remaining"
+CONF_PV_ENERGY_TODAY: Final = "pv_energy_today"
+CONF_GRID_FEED_TODAY: Final = "grid_feed_today"
+CONF_SOLCAST_TOTAL_TODAY: Final = "solcast_total_today"
+CONF_SOLCAST_FORECAST_SO_FAR: Final = "solcast_forecast_so_far"
 CONF_TARGET_EXPORT: Final = "target_export"
 CONF_MIN_SOC: Final = "min_soc"
 CONF_SAFETY_MARGIN: Final = "safety_margin"
@@ -23,14 +24,14 @@ SERVICE_CALCULATE_DISCHARGE: Final = "calculate_discharge"
 # Default values
 DEFAULT_TARGET_EXPORT: Final = 0  # Watts
 DEFAULT_MIN_SOC: Final = 20  # Percent
-DEFAULT_SAFETY_MARGIN: Final = 500  # Watts (0.5 kWh over 1 hour)
+DEFAULT_SAFETY_MARGIN: Final = 0.5  # kWh (0.5 kWh margin)
 DEFAULT_SCAN_INTERVAL: Final = 30  # Seconds
 
 # Attributes
-ATTR_CURRENT_THRESHOLD: Final = "current_threshold"
-ATTR_GRID_EXPORT: Final = "grid_export"
+ATTR_EXPORT_HEADROOM: Final = "export_headroom_kwh"
+ATTR_EXPORT_ALLOWED: Final = "export_allowed_kwh"
+ATTR_EXPORTED_TODAY: Final = "exported_today_kwh"
 ATTR_DISCHARGE_NEEDED: Final = "discharge_needed"
-ATTR_SAFE_EXPORT_LIMIT: Final = "safe_export_limit"
-ATTR_CURRENT_PV: Final = "current_pv"
-ATTR_FORECAST_PV: Final = "forecast_pv"
+ATTR_CURRENT_PV: Final = "current_pv_kwh"
+ATTR_FORECAST_PV: Final = "forecast_pv_kwh"
 ATTR_LAST_CALCULATION: Final = "last_calculation"

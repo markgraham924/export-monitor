@@ -9,24 +9,26 @@
           "discharge_power": "Alpha ESS Discharge Power",
           "discharge_cutoff_soc": "Alpha ESS Cutoff SOC",
           "current_soc": "Current Battery SOC Sensor",
-          "grid_power": "Grid Power Sensor",
-          "current_pv": "Current PV Production Sensor",
-          "solcast_remaining": "Solcast Remaining Today Sensor",
+          "pv_energy_today": "Today's PV Energy (kWh)",
+          "grid_feed_today": "Today's Grid Feed (kWh)",
+          "solcast_total_today": "Solcast Forecast Total Today (kWh)",
+          "solcast_forecast_so_far": "Solcast Forecast So Far (kWh) (optional)",
           "target_export": "Target Grid Export (W)",
           "min_soc": "Minimum Battery SOC (%)",
-          "safety_margin": "Safety Margin (W)"
+          "safety_margin": "Safety Margin (kWh)"
         },
         "data_description": {
           "discharge_button": "Alpha ESS helper boolean entity that controls discharge (e.g., input_boolean.alphaess_helper_force_discharging)",
           "discharge_power": "Alpha ESS discharge power control in kW (e.g., number.alphaess_template_force_discharging_power)",
           "discharge_cutoff_soc": "Alpha ESS cutoff SOC control (e.g., number.alphaess_template_discharging_cutoff_soc)",
           "current_soc": "Sensor showing current battery state of charge",
-          "grid_power": "Sensor showing grid power (negative when exporting)",
-          "current_pv": "Sensor showing current PV production in watts",
-          "solcast_remaining": "Solcast sensor for remaining forecast today in kWh",
+          "pv_energy_today": "Cumulative PV energy generated today in kWh",
+          "grid_feed_today": "Cumulative grid export today in kWh",
+          "solcast_total_today": "Solcast forecast total for today in kWh",
+          "solcast_forecast_so_far": "Solcast forecast produced so far today in kWh (optional)",
           "target_export": "Target maximum grid export power (typically 0)",
           "min_soc": "Minimum battery SOC before discharge is disabled",
-          "safety_margin": "Additional margin to stay within T&C limits (default 500W = 0.5kWh)"
+          "safety_margin": "Additional margin to stay within T&C limits (default 0.5 kWh)"
         }
       }
     },
@@ -45,7 +47,7 @@
         "data": {
           "target_export": "Target Grid Export (W)",
           "min_soc": "Minimum Battery SOC (%)",
-          "safety_margin": "Safety Margin (W)"
+          "safety_margin": "Safety Margin (kWh)"
         }
       }
     }

@@ -5,7 +5,7 @@ import logging
 
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfPower
+from homeassistant.const import UnitOfEnergy, UnitOfPower
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -133,11 +133,11 @@ class MinimumSOCNumber(ExportMonitorNumber):
 class SafetyMarginNumber(ExportMonitorNumber):
     """Number entity for safety margin."""
 
-    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_mode = NumberMode.BOX
     _attr_native_min_value = 0
-    _attr_native_max_value = 2000
-    _attr_native_step = 100
+    _attr_native_max_value = 20
+    _attr_native_step = 0.1
 
     def __init__(
         self,

@@ -10,18 +10,18 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfPower
+from homeassistant.const import UnitOfEnergy, UnitOfPower
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     ATTR_CURRENT_PV,
-    ATTR_CURRENT_THRESHOLD,
     ATTR_DISCHARGE_NEEDED,
+    ATTR_EXPORT_ALLOWED,
+    ATTR_EXPORT_HEADROOM,
+    ATTR_EXPORTED_TODAY,
     ATTR_FORECAST_PV,
-    ATTR_GRID_EXPORT,
-    ATTR_SAFE_EXPORT_LIMIT,
     DOMAIN,
 )
 from .coordinator import ExportMonitorCoordinator
@@ -39,9 +39,9 @@ async def async_setup_entry(
 
     async_add_entities(
         [
-            SafeExportLimitSensor(coordinator, entry),
+            ExportHeadroomSensor(coordinator, entry),
             DischargeNeededSensor(coordinator, entry),
-            GridExportSensor(coordinator, entry),
+            ExportedTodaySensor(coordinator, entry),
             DischargeStatusSensor(coordinator, entry),
         ]
     )
@@ -69,11 +69,11 @@ class ExportMonitorSensor(CoordinatorEntity, SensorEntity):
         self._attr_icon = icon
 
 
-class SafeExportLimitSensor(ExportMonitorSensor):
-    """Sensor showing the safe export limit."""
+class ExportHeadroomSensor(ExportMonitorSensor):
+    """Sensor showing remaining export headroom (kWh)."""
 
-    _attr_device_class = SensorDeviceClass.POWER
-    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(
@@ -85,8 +85,8 @@ class SafeExportLimitSensor(ExportMonitorSensor):
         super().__init__(
             coordinator,
             entry,
-            "safe_export_limit",
-            "Safe Export Limit",
+            "export_headroom",
+            "Export Headroom",
             "mdi:shield-check",
         )
 
@@ -94,7 +94,7 @@ class SafeExportLimitSensor(ExportMonitorSensor):
     def native_value(self) -> float | None:
         """Return the state of the sensor."""
         if self.coordinator.data:
-            return self.coordinator.data.get(ATTR_SAFE_EXPORT_LIMIT)
+            return self.coordinator.data.get(ATTR_EXPORT_HEADROOM)
         return None
 
     @property
@@ -106,11 +106,12 @@ class SafeExportLimitSensor(ExportMonitorSensor):
         return {
             ATTR_CURRENT_PV: self.coordinator.data.get(ATTR_CURRENT_PV),
             ATTR_FORECAST_PV: self.coordinator.data.get(ATTR_FORECAST_PV),
+            ATTR_EXPORT_ALLOWED: self.coordinator.data.get(ATTR_EXPORT_ALLOWED),
         }
 
 
 class DischargeNeededSensor(ExportMonitorSensor):
-    """Sensor showing the discharge power needed."""
+    """Sensor showing recommended discharge power (1h window assumption)."""
 
     _attr_device_class = SensorDeviceClass.POWER
     _attr_native_unit_of_measurement = UnitOfPower.WATT
@@ -149,12 +150,12 @@ class DischargeNeededSensor(ExportMonitorSensor):
         }
 
 
-class GridExportSensor(ExportMonitorSensor):
-    """Sensor showing current grid export."""
+class ExportedTodaySensor(ExportMonitorSensor):
+    """Sensor showing total exported energy today."""
 
-    _attr_device_class = SensorDeviceClass.POWER
-    _attr_native_unit_of_measurement = UnitOfPower.WATT
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
 
     def __init__(
         self,
@@ -165,8 +166,8 @@ class GridExportSensor(ExportMonitorSensor):
         super().__init__(
             coordinator,
             entry,
-            "grid_export",
-            "Grid Export",
+            "exported_today",
+            "Exported Today",
             "mdi:transmission-tower-export",
         )
 
@@ -174,7 +175,7 @@ class GridExportSensor(ExportMonitorSensor):
     def native_value(self) -> float | None:
         """Return the state of the sensor."""
         if self.coordinator.data:
-            return self.coordinator.data.get(ATTR_GRID_EXPORT)
+            return self.coordinator.data.get(ATTR_EXPORTED_TODAY)
         return None
 
 
@@ -215,6 +216,6 @@ class DischargeStatusSensor(ExportMonitorSensor):
             return {}
 
         return {
-            ATTR_CURRENT_THRESHOLD: self.coordinator.data.get(ATTR_CURRENT_THRESHOLD),
-            ATTR_SAFE_EXPORT_LIMIT: self.coordinator.data.get(ATTR_SAFE_EXPORT_LIMIT),
+            ATTR_EXPORT_HEADROOM: self.coordinator.data.get(ATTR_EXPORT_HEADROOM),
+            ATTR_EXPORT_ALLOWED: self.coordinator.data.get(ATTR_EXPORT_ALLOWED),
         }

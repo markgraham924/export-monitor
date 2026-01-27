@@ -96,19 +96,20 @@ input_number:
 3. Search for "Energy Export Monitor"
 4. Follow the setup wizard:
 
-   **Required Entities:**
-   - **Alpha ESS Discharge Button**: Select `input_boolean.alphaess_helper_force_discharging`
-   - **Alpha ESS Discharge Power**: Select `number.alphaess_template_force_discharging_power`
-   - **Alpha ESS Cutoff SOC**: Select `number.alphaess_template_discharging_cutoff_soc`
-   - **Current Battery SOC**: Select your Alpha ESS SOC sensor (e.g., `sensor.alphaess_battery_soc`)
-   - **Grid Power Sensor**: Select your Alpha ESS grid power sensor (e.g., `sensor.alphaess_power_grid`)
-   - **Current PV Production**: Select your Alpha ESS PV sensor (e.g., `sensor.alphaess_current_pv_production`)
-   - **Solcast Remaining Today**: Select `sensor.solcast_pv_forecast_remaining_today`
+  **Required Entities:**
+  - **Alpha ESS Discharge Button**: Select `input_boolean.alphaess_helper_force_discharging`
+  - **Alpha ESS Discharge Power**: Select `number.alphaess_template_force_discharging_power`
+  - **Alpha ESS Cutoff SOC**: Select `number.alphaess_template_discharging_cutoff_soc`
+  - **Current Battery SOC**: Select your Alpha ESS SOC sensor (e.g., `sensor.alphaess_battery_soc`)
+  - **Today's PV Energy (kWh)**: `sensor.alphaess_today_s_energy_from_pv`
+  - **Today's Grid Feed (kWh)**: `sensor.alphaess_today_s_energy_feed_to_grid_meter`
+  - **Solcast Forecast Total Today (kWh)**: `sensor.solcast_pv_forecast_forecast_today`
+  - **Solcast Forecast So Far (kWh, optional)**: `sensor.solcast_forecast_so_far`
 
-   **Optional Settings:**
-   - **Target Grid Export**: Target maximum export power in watts (default: 0)
-   - **Minimum Battery SOC**: Minimum battery level before discharge stops (default: 20%)
-   - **Safety Margin**: Additional margin in watts to prevent T&C breaches (default: 500W)
+  **Optional Settings:**
+  - **Target Grid Export**: Target maximum export power in watts (default: 0)
+  - **Minimum Battery SOC**: Minimum battery level before discharge stops (default: 20%)
+  - **Safety Margin**: Additional margin in kWh to prevent T&C breaches (default: 0.5 kWh)
 
 5. Click **Submit**
 
@@ -251,29 +252,25 @@ entities:
   - entity: button.export_monitor_stop_discharge
 ```
 
-## How the Calculation Works
+### How the Calculation Works
 
-### Safe Export Limit Formula
-
-```
-safe_export_limit = max(current_pv_watts, forecast_pv_watts) + safety_margin
-```
-
-Where:
-- `current_pv_watts`: Real-time PV production in watts
-- `forecast_pv_watts`: Solcast remaining forecast in kWh × 1000 (converted to watts)
-- `safety_margin`: Configurable buffer (default 500W = 0.5kWh)
-
-### Discharge Calculation
+### Export Headroom Formula (Energy-Based)
 
 ```
-If grid_export > safe_export_limit AND battery_soc > min_soc:
-    discharge_needed = grid_export - safe_export_limit
+export_cap_kwh = max(pv_energy_today_kwh, solcast_total_today_kwh) + safety_margin_kwh
+export_headroom_kwh = export_cap_kwh - grid_feed_today_kwh
+```
+
+### Recommended Discharge Power
+
+```
+If battery_soc > min_soc and export_headroom_kwh > 0:
+  recommended_power_w = export_headroom_kwh * 1000  # assumes 1h window
 Else:
-    discharge_needed = 0
+  recommended_power_w = 0
 ```
 
-The integration uses the **higher value** between current PV production and forecast to ensure you stay within limits even during variable cloud conditions.
+The headroom keeps exported energy within 0.5kWh (default) of the higher of actual or forecast PV for the day.
 
 ## Troubleshooting
 

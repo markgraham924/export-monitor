@@ -7,20 +7,20 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import selector
 
 from .const import (
-    CONF_CURRENT_PV,
     CONF_CURRENT_SOC,
     CONF_DISCHARGE_BUTTON,
     CONF_DISCHARGE_CUTOFF_SOC,
     CONF_DISCHARGE_POWER,
-    CONF_GRID_POWER,
+    CONF_GRID_FEED_TODAY,
     CONF_MIN_SOC,
+    CONF_PV_ENERGY_TODAY,
     CONF_SAFETY_MARGIN,
-    CONF_SOLCAST_REMAINING,
+    CONF_SOLCAST_FORECAST_SO_FAR,
+    CONF_SOLCAST_TOTAL_TODAY,
     CONF_TARGET_EXPORT,
     DEFAULT_MIN_SOC,
     DEFAULT_SAFETY_MARGIN,
@@ -61,8 +61,9 @@ class ExportMonitorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_DISCHARGE_CUTOFF_SOC,
                 CONF_CURRENT_SOC,
                 CONF_GRID_POWER,
-                CONF_CURRENT_PV,
-                CONF_SOLCAST_REMAINING,
+                CONF_PV_ENERGY_TODAY,
+                CONF_GRID_FEED_TODAY,
+                CONF_SOLCAST_TOTAL_TODAY,
             ]:
                 if not _validate_entity(self.hass, user_input[key]):
                     errors[key] = "entity_not_found"
@@ -98,19 +99,24 @@ class ExportMonitorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         device_class="battery",
                     )
                 ),
-                vol.Required(CONF_GRID_POWER): selector.EntitySelector(
+                vol.Required(CONF_PV_ENERGY_TODAY): selector.EntitySelector(
                     selector.EntitySelectorConfig(
                         domain="sensor",
-                        device_class="power",
+                        device_class="energy",
                     )
                 ),
-                vol.Required(CONF_CURRENT_PV): selector.EntitySelector(
+                vol.Required(CONF_GRID_FEED_TODAY): selector.EntitySelector(
                     selector.EntitySelectorConfig(
                         domain="sensor",
-                        device_class="power",
+                        device_class="energy",
                     )
                 ),
-                vol.Required(CONF_SOLCAST_REMAINING): selector.EntitySelector(
+                vol.Required(CONF_SOLCAST_TOTAL_TODAY): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain="sensor",
+                    )
+                ),
+                vol.Optional(CONF_SOLCAST_FORECAST_SO_FAR): selector.EntitySelector(
                     selector.EntitySelectorConfig(
                         domain="sensor",
                     )
@@ -142,9 +148,9 @@ class ExportMonitorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                         min=0,
-                        max=2000,
-                        step=100,
-                        unit_of_measurement="W",
+                        max=20,
+                        step=0.1,
+                        unit_of_measurement="kWh",
                         mode=selector.NumberSelectorMode.BOX,
                     )
                 ),
@@ -217,9 +223,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                         min=0,
-                        max=2000,
-                        step=100,
-                        unit_of_measurement="W",
+                        max=20,
+                        step=0.1,
+                        unit_of_measurement="kWh",
                         mode=selector.NumberSelectorMode.BOX,
                     )
                 ),
