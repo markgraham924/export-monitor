@@ -12,6 +12,7 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
 
 from .const import (
+    ATTR_EXPORT_HEADROOM,
     CONF_CURRENT_SOC,
     CONF_DISCHARGE_BUTTON,
     CONF_DISCHARGE_CUTOFF_SOC,
@@ -143,7 +144,7 @@ async def async_setup_services(
     async def handle_start_discharge(call: ServiceCall) -> None:
         """Handle start discharge service call."""
         power = call.data.get("power")
-        duration = call.data.get("duration", 60)  # Default 60 minutes
+        duration = call.data.get("duration")  # Optional - will use calculated if not provided
 
         config_data = {**coordinator.entry.data, **coordinator.entry.options}
         current_soc_entity = config_data[CONF_CURRENT_SOC]
@@ -169,6 +170,15 @@ async def async_setup_services(
                 min_soc,
             )
             return
+
+        # Use calculated duration if not provided
+        if duration is None:
+            if coordinator.data and "calculated_duration" in coordinator.data:
+                duration = coordinator.data["calculated_duration"]
+                _LOGGER.info("Using calculated discharge duration: %.1f minutes", duration)
+            else:
+                duration = 60  # Fallback default
+                _LOGGER.warning("No calculated duration available, using default: %d minutes", duration)
 
         # Set discharge power
         discharge_power_entity = config_data[CONF_DISCHARGE_POWER]
@@ -230,13 +240,22 @@ async def async_setup_services(
             blocking=True,
         )
 
-        coordinator.set_discharge_active(True)
+        # Get current grid export for tracking
+        grid_feed_entity = config_data[CONF_GRID_FEED_TODAY]
+        grid_feed_state = hass.states.get(grid_feed_entity)
+        current_grid_export = float(grid_feed_state.state) if grid_feed_state else 0.0
+        
+        # Calculate target energy (headroom from coordinator data)
+        target_energy = coordinator.data.get(ATTR_EXPORT_HEADROOM, 0.0) if coordinator.data else 0.0
+        
+        coordinator.set_discharge_active(True, current_grid_export, target_energy)
 
         _LOGGER.info(
-            "Started discharge: %.0f W for %d min (cutoff SOC: %.0f%%)",
+            "Started discharge: %.0f W for %.1f min (cutoff SOC: %.0f%%, target: %.3f kWh)",
             power,
             duration,
             min_soc,
+            target_energy,
         )
 
     async def handle_stop_discharge(call: ServiceCall) -> None:
@@ -279,7 +298,7 @@ async def async_setup_services(
         schema=vol.Schema(
             {
                 vol.Required("power"): cv.positive_int,
-                vol.Optional("duration", default=60): cv.positive_int,
+                vol.Optional("duration"): cv.positive_int,  # Optional - uses calculated duration if not provided
             }
         ),
     )

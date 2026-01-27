@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-01-27
+
+### Added
+- Dynamic discharge duration calculation based on target export power
+- New `_calculate_discharge_duration()` method in coordinator with background load buffer (default 10%)
+- New sensors: `calculated_duration` (minutes) and `discharge_complete` (status)
+- Discharge progress tracking: monitors grid export during discharge and logs when target is reached
+- Coordinator now tracks discharge start time, initial export, and target energy
+
+### Changed
+- **BREAKING**: Discharge logic no longer assumes 1-hour duration
+- Discharge power now uses `target_export` configuration value instead of calculating from headroom
+- Duration calculation: `duration_minutes = (headroom_kwh / target_export_kw) * 60 * (1 + buffer)`
+- Service `start_discharge` now has optional `duration` parameter - uses calculated duration if not provided
+- Enhanced logging for discharge tracking and duration calculation
+
+### Example
+- With 1 kWh headroom and 3.68 kW target export: duration = ~16 minutes (plus 10% buffer = ~18 minutes)
+- With 0.5 kWh headroom and 3.68 kW target export: duration = ~8 minutes (plus buffer = ~9 minutes)
+
 ## [1.0.3] - 2026-01-27
 
 ### Fixed
