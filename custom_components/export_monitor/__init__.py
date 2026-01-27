@@ -175,10 +175,24 @@ async def async_setup_services(
         if duration is None:
             if coordinator.data and "calculated_duration" in coordinator.data:
                 duration = coordinator.data["calculated_duration"]
-                _LOGGER.info("Using calculated discharge duration: %.1f minutes", duration)
+                if duration > 0:
+                    _LOGGER.info("Using calculated discharge duration: %.1f minutes", duration)
+                else:
+                    _LOGGER.error("Cannot start discharge: calculated duration is 0 (no headroom available)")
+                    return
             else:
-                duration = 60  # Fallback default
-                _LOGGER.warning("No calculated duration available, using default: %d minutes", duration)
+                _LOGGER.error("Cannot start discharge: no duration provided and no calculated duration available")
+                return
+        
+        # Additional safety check: don't start discharge if no headroom
+        if coordinator.data:
+            headroom = coordinator.data.get(ATTR_EXPORT_HEADROOM, 0)
+            if headroom <= 0:
+                _LOGGER.error(
+                    "Cannot start discharge: no export headroom available (%.3f kWh)",
+                    headroom
+                )
+                return
 
         # Set discharge power
         discharge_power_entity = config_data[CONF_DISCHARGE_POWER]

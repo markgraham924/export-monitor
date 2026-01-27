@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-01-27
+
+### Fixed
+- **Critical**: Auto-stop discharge when export headroom is exhausted (≤0 kWh)
+- Prevents continued discharge when safe export limit is reached or exceeded
+- Fixed duration fallback logic - no longer defaults to 60 minutes when headroom is 0
+- Added validation to prevent starting discharge when no headroom available
+- Improved auto-stop logic with unified check for all stop conditions
+
+### Changed
+- Auto-stop now triggers for three conditions (in priority order):
+  1. Export headroom exhausted (≤0 kWh) - prevents export limit breach
+  2. Discharge target reached - when calculated energy exported
+  3. Reserve SOC limit reached - battery protection
+- Service handler now rejects discharge start when calculated duration is 0
+- Enhanced logging shows specific stop reason
+
+### Technical Details
+- Coordinator checks headroom every 30 seconds during discharge
+- Auto-stop callback triggers immediately when any limit reached
+- Prevents negative export headroom situations
+
 ## [1.2.0] - 2026-01-27
 
 ### Added
