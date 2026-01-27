@@ -179,6 +179,12 @@ class ExportMonitorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Create the options flow."""
         return OptionsFlowHandler(config_entry)
 
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.FlowResult:
+        """Handle reconfiguration of entities."""
+        return await self._async_handle_step(user_input)
+
 
 class OptionsFlowHandler(config_entries.OptionsFlow):
     """Handle options flow for the integration."""

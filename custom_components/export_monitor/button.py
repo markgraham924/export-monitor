@@ -84,7 +84,6 @@ class StartDischargeButton(ExportMonitorButton):
             return
 
         discharge_needed = self.coordinator.data.get("discharge_needed", 0)
-        min_soc = self.coordinator.data.get("min_soc", 20)
 
         if discharge_needed <= 0:
             _LOGGER.info("No discharge needed at this time")
@@ -96,7 +95,7 @@ class StartDischargeButton(ExportMonitorButton):
             "start_discharge",
             {
                 "power": int(discharge_needed),
-                "cutoff_soc": int(min_soc),
+                "duration": 60,  # Default 1 hour
             },
             blocking=True,
         )

@@ -129,10 +129,21 @@ async def async_setup_services(
 ) -> None:
     """Set up services for the integration."""
 
+    def _get_domain_and_service(entity_id: str, service_type: str) -> tuple[str, str]:
+        """Get the correct domain and service for an entity."""
+        domain = entity_id.split(".")[0]
+        if service_type == "set_value":
+            return domain, "set_value"
+        elif service_type == "turn_on":
+            return domain, "turn_on"
+        elif service_type == "turn_off":
+            return domain, "turn_off"
+        return domain, service_type
+
     async def handle_start_discharge(call: ServiceCall) -> None:
         """Handle start discharge service call."""
         power = call.data.get("power")
-        cutoff_soc = call.data.get("cutoff_soc")
+        duration = call.data.get("duration", 60)  # Default 60 minutes
 
         config_data = {**coordinator.entry.data, **coordinator.entry.options}
         current_soc_entity = config_data[CONF_CURRENT_SOC]
@@ -161,9 +172,10 @@ async def async_setup_services(
 
         # Set discharge power
         discharge_power_entity = config_data[CONF_DISCHARGE_POWER]
+        domain, service = _get_domain_and_service(discharge_power_entity, "set_value")
         await hass.services.async_call(
-            "number",
-            "set_value",
+            domain,
+            service,
             {
                 "entity_id": discharge_power_entity,
                 "value": power / 1000,  # Convert W to kW
@@ -171,24 +183,49 @@ async def async_setup_services(
             blocking=True,
         )
 
-        # Set cutoff SOC
-        if cutoff_soc is not None:
-            discharge_cutoff_entity = config_data[CONF_DISCHARGE_CUTOFF_SOC]
+        # Set cutoff SOC to min_soc (always 20% to avoid Alpha ESS grid-switch behavior)
+        discharge_cutoff_entity = config_data[CONF_DISCHARGE_CUTOFF_SOC]
+        domain, service = _get_domain_and_service(discharge_cutoff_entity, "set_value")
+        await hass.services.async_call(
+            domain,
+            service,
+            {
+                "entity_id": discharge_cutoff_entity,
+                "value": min_soc,
+            },
+            blocking=True,
+        )
+
+        # Set discharge duration (if entity exists)
+        # Look for duration entity - common patterns
+        duration_entity = None
+        for pattern in [
+            "input_number.alphaess_helper_force_discharging_duration",
+            "number.alphaess_template_force_discharging_duration",
+        ]:
+            if hass.states.get(pattern):
+                duration_entity = pattern
+                break
+
+        if duration_entity:
+            domain, service = _get_domain_and_service(duration_entity, "set_value")
             await hass.services.async_call(
-                "number",
-                "set_value",
+                domain,
+                service,
                 {
-                    "entity_id": discharge_cutoff_entity,
-                    "value": cutoff_soc,
+                    "entity_id": duration_entity,
+                    "value": duration,
                 },
                 blocking=True,
             )
+            _LOGGER.info("Set discharge duration to %d minutes", duration)
 
         # Enable discharge button
         discharge_button_entity = config_data[CONF_DISCHARGE_BUTTON]
+        domain, service = _get_domain_and_service(discharge_button_entity, "turn_on")
         await hass.services.async_call(
-            "input_boolean",
-            "turn_on",
+            domain,
+            service,
             {"entity_id": discharge_button_entity},
             blocking=True,
         )
@@ -196,9 +233,10 @@ async def async_setup_services(
         coordinator.set_discharge_active(True)
 
         _LOGGER.info(
-            "Started discharge: %.0f W until %.0f%% SOC",
+            "Started discharge: %.0f W for %d min (cutoff SOC: %.0f%%)",
             power,
-            cutoff_soc if cutoff_soc else min_soc,
+            duration,
+            min_soc,
         )
 
     async def handle_stop_discharge(call: ServiceCall) -> None:
@@ -207,9 +245,10 @@ async def async_setup_services(
         discharge_button_entity = config_data[CONF_DISCHARGE_BUTTON]
 
         # Disable discharge button
+        domain, service = _get_domain_and_service(discharge_button_entity, "turn_off")
         await hass.services.async_call(
-            "input_boolean",
-            "turn_off",
+            domain,
+            service,
             {"entity_id": discharge_button_entity},
             blocking=True,
         )
@@ -239,9 +278,7 @@ async def async_setup_services(
         handle_start_discharge,
         schema=vol.Schema(
             {
-                vol.Required("power"): cv.positive_int,
-                vol.Optional("cutoff_soc"): vol.All(
-                    vol.Coerce(int), vol.Range(min=0, max=100)
+                vol.Required("duration", default=60): cv.positive_int   vol.Coerce(int), vol.Range(min=0, max=100)
                 ),
             }
         ),
