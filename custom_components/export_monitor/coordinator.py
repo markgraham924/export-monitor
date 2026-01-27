@@ -60,7 +60,6 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
         self._discharge_target_energy = None  # Energy to discharge (kWh)
         self._discharge_start_time = None  # When discharge started
         self._calculated_duration = None  # Calculated discharge duration (minutes)
-        self._stop_discharge_callback = None  # Callback to stop discharge
 
     def _get_sensor_value(self, entity_id: str) -> float | None:
         """Get sensor value as float."""
@@ -242,8 +241,14 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
             
             if should_stop_discharge:
                 _LOGGER.warning("Auto-stopping discharge: %s", stop_reason)
-                if self._stop_discharge_callback:
-                    self.hass.async_create_task(self._stop_discharge_callback())
+                # Call the stop discharge service
+                self.hass.async_create_task(
+                    self.hass.services.async_call(
+                        DOMAIN,
+                        "stop_discharge",
+                        {},
+                    )
+                )
 
         return {
             ATTR_EXPORT_HEADROOM: headroom_kwh,
@@ -295,8 +300,4 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
             self._discharge_target_energy = None
             self._discharge_start_time = None
             _LOGGER.info("Discharge stopped")
-    
-    def set_stop_discharge_callback(self, callback) -> None:
-        """Set callback to be called when discharge should be stopped."""
-        self._stop_discharge_callback = callback
 

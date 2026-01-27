@@ -304,9 +304,6 @@ async def async_setup_services(
                 safe_limit,
             )
     
-    # Set up auto-stop callback for reserve SOC monitoring
-    coordinator.set_stop_discharge_callback(handle_stop_discharge)
-
     # Register services
     hass.services.async_register(
         DOMAIN,
