@@ -74,6 +74,34 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
             _LOGGER.error("Cannot convert %s state to float: %s", entity_id, err)
             return None
 
+    def _get_desired_duration(self) -> float | None:
+        """Get desired discharge duration from helper entity if it exists."""
+        # Check common duration entity patterns
+        duration_entities = [
+            "input_number.alphaess_helper_force_discharging_duration",
+            "number.alphaess_template_force_discharging_duration",
+        ]
+        
+        for entity_id in duration_entities:
+            state = self.hass.states.get(entity_id)
+            if state is not None and state.state not in [STATE_UNKNOWN, STATE_UNAVAILABLE]:
+                try:
+                    duration = float(state.state)
+                    if duration > 0:
+                        _LOGGER.debug(
+                            "Found duration entity %s with value %.1f minutes",
+                            entity_id,
+                            duration,
+                        )
+                        return duration
+                except (ValueError, TypeError) as err:
+                    _LOGGER.debug(
+                        "Cannot convert %s state to float: %s", entity_id, err
+                    )
+                    continue
+        
+        return None
+
     def _calculate_export_headroom(
         self,
         pv_energy_today: float,
@@ -201,10 +229,26 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                     headroom_kwh, target_export
                 )
             else:
-                # If no target_export configured, calculate based on headroom
-                # Assume we want to discharge over 1 hour
-                recommended_discharge_w = headroom_kwh * 1000
-                calculated_duration_minutes = 60.0
+                # If no target_export configured, read desired duration from helper entity
+                desired_duration = self._get_desired_duration()
+                if desired_duration and desired_duration > 0:
+                    # Calculate discharge power based on headroom and desired duration
+                    calculated_duration_minutes = desired_duration
+                    # Power = Energy / Time (convert duration from minutes to hours)
+                    recommended_discharge_w = (headroom_kwh / (desired_duration / 60.0)) * 1000
+                    _LOGGER.debug(
+                        "Using desired duration from helper entity: %.1f minutes, "
+                        "calculated discharge power: %.0f W",
+                        desired_duration,
+                        recommended_discharge_w,
+                    )
+                else:
+                    # Fallback: discharge over 1 hour if no duration entity found
+                    recommended_discharge_w = headroom_kwh * 1000
+                    calculated_duration_minutes = 60.0
+                    _LOGGER.debug(
+                        "No duration entity found or invalid value, using default 60 minutes"
+                    )
         
         # Store calculated duration for service use
         self._calculated_duration = calculated_duration_minutes

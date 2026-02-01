@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.3] - 2026-02-01
+
+### Fixed
+- **Critical**: Discharge duration now respects user-configured value from helper entity
+- When `target_export` is 0 (default), the system now reads the desired duration from `input_number.alphaess_helper_force_discharging_duration` or `number.alphaess_template_force_discharging_duration`
+- No longer hardcodes duration to 60 minutes when these entities have different values
+- Discharge power is now calculated based on the desired duration: `power = (headroom_kwh / (duration_minutes / 60)) * 1000`
+
+### Changed
+- Added `_get_desired_duration()` method to coordinator to read duration from helper entities
+- Enhanced logging to show when duration is read from helper entity vs fallback default
+
+### Technical Details
+- When `target_export` is configured (>0), duration is still calculated dynamically based on headroom and target power
+- When `target_export` is 0, system now checks for duration helper entity first, then falls back to 60 minutes only if entity not found
+- This allows users to control discharge duration through the helper entity as originally intended
+
 ## [1.2.2] - 2026-01-27
 
 ### Fixed
