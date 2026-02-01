@@ -202,9 +202,11 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                 )
             else:
                 # If no target_export configured, calculate based on headroom
-                # Assume we want to discharge over 1 hour
+                # Base: discharge over 1 hour. Duration will include 10% buffer via calculation.
                 recommended_discharge_w = headroom_kwh * 1000
-                calculated_duration_minutes = 60.0
+                calculated_duration_minutes = self._calculate_discharge_duration(
+                    headroom_kwh, recommended_discharge_w
+                )
         
         # Store calculated duration for service use
         self._calculated_duration = calculated_duration_minutes
