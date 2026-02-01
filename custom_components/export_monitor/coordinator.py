@@ -235,7 +235,28 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                     # Calculate discharge power based on headroom and desired duration
                     calculated_duration_minutes = desired_duration
                     # Power = Energy / Time (convert duration from minutes to hours)
-                    recommended_discharge_w = (headroom_kwh / (desired_duration / 60.0)) * 1000
+                    raw_discharge_w = (headroom_kwh / (desired_duration / 60.0)) * 1000
+                    # Apply safety bounds to the calculated discharge power
+                    MIN_DISCHARGE_POWER_W = 50.0
+                    MAX_DISCHARGE_POWER_W = 10000.0
+                    if raw_discharge_w < MIN_DISCHARGE_POWER_W:
+                        _LOGGER.warning(
+                            "Calculated discharge power %.0f W is below minimum %.0f W; "
+                            "using minimum power instead.",
+                            raw_discharge_w,
+                            MIN_DISCHARGE_POWER_W,
+                        )
+                        recommended_discharge_w = MIN_DISCHARGE_POWER_W
+                    elif raw_discharge_w > MAX_DISCHARGE_POWER_W:
+                        _LOGGER.warning(
+                            "Calculated discharge power %.0f W is above maximum %.0f W; "
+                            "using maximum power instead.",
+                            raw_discharge_w,
+                            MAX_DISCHARGE_POWER_W,
+                        )
+                        recommended_discharge_w = MAX_DISCHARGE_POWER_W
+                    else:
+                        recommended_discharge_w = raw_discharge_w
                     _LOGGER.debug(
                         "Using desired duration from helper entity: %.1f minutes, "
                         "calculated discharge power: %.0f W",
