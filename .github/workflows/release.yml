@@ -8,56 +8,28 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Extract version from tag
-        id: get_version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-
-      - name: Create Release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
-          body: |
-            ## Changes in this Release
-            
-            See the [CHANGELOG](CHANGELOG.md) for details.
-            
-            ## Installation
-            
-            ### Via HACS
-            1. Go to HACS → Integrations
-            2. Find "Energy Export Monitor"
-            3. Click Update (or Install if new)
-            
-            ### Manual Installation
-            1. Download `export_monitor.zip` from assets below
-            2. Extract to `config/custom_components/`
-            3. Restart Home Assistant
-            
-            ---
-            
-            **Full Changelog**: https://github.com/${{ github.repository }}/compare/v${{ steps.get_version.outputs.VERSION }}...v${{ steps.get_version.outputs.VERSION }}
-          draft: false
-          prerelease: false
-
-      - name: Create ZIP for release
+      - name: Build ZIP asset
         run: |
           cd custom_components
           zip -r ../export_monitor.zip export_monitor/
-          cd ..
 
-      - name: Upload Release Asset
-        uses: actions/upload-release-asset@v1
+      - name: Publish release (create or update)
+        id: release
+        uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./export_monitor.zip
-          asset_name: export_monitor.zip
-          asset_content_type: application/zip
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: export_monitor.zip
+          overwrite_files: true
+          fail_on_unmatched_files: true
