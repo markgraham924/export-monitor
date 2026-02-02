@@ -83,20 +83,17 @@ class StartDischargeButton(ExportMonitorButton):
             _LOGGER.warning("No coordinator data available")
             return
 
-        discharge_needed = self.coordinator.data.get("discharge_needed", 0)
+        headroom = self.coordinator.data.get("export_headroom_kwh", 0)
 
-        if discharge_needed <= 0:
-            _LOGGER.info("No discharge needed at this time")
+        if headroom <= 0:
+            _LOGGER.info("No export headroom available at this time")
             return
 
-        # Call the start_discharge service
+        # Call the start_discharge service (duration calculated automatically)
         await self.hass.services.async_call(
             DOMAIN,
             "start_discharge",
-            {
-                "power": int(discharge_needed),
-                "duration": 60,  # Default 1 hour
-            },
+            {},
             blocking=True,
         )
 

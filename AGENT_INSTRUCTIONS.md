@@ -244,9 +244,9 @@ if not state or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
 
 ## Contact
 
-- **Repository**: https://github.com/markg/export-monitor
-- **Issues**: https://github.com/markg/export-monitor/issues
-- **Code Owner**: @markg
+- **Repository**: https://github.com/markgraham924/export-monitor
+- **Issues**: https://github.com/markgraham924/export-monitor/issues
+- **Code Owner**: @markgraham924
 
 ---
 

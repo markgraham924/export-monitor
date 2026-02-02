@@ -143,9 +143,6 @@ async def async_setup_services(
 
     async def handle_start_discharge(call: ServiceCall) -> None:
         """Handle start discharge service call."""
-        power = call.data.get("power")
-        duration = call.data.get("duration")  # Optional - will use calculated if not provided
-
         config_data = {**coordinator.entry.data, **coordinator.entry.options}
         current_soc_entity = config_data[CONF_CURRENT_SOC]
         min_soc = config_data.get(CONF_MIN_SOC, DEFAULT_MIN_SOC)
@@ -171,54 +168,74 @@ async def async_setup_services(
             )
             return
 
-        # Use calculated duration if not provided
-        if duration is None:
-            if coordinator.data and "calculated_duration" in coordinator.data:
-                duration = coordinator.data["calculated_duration"]
-                if duration > 0:
-                    _LOGGER.info("Using calculated discharge duration: %.1f minutes", duration)
-                else:
-                    _LOGGER.error("Cannot start discharge: calculated duration is 0 (no headroom available)")
-                    return
-            else:
-                _LOGGER.error("Cannot start discharge: no duration provided and no calculated duration available")
-                return
-        
-        # Additional safety check: don't start discharge if no headroom
-        if coordinator.data:
-            headroom = coordinator.data.get(ATTR_EXPORT_HEADROOM, 0)
-            if headroom <= 0:
-                _LOGGER.error(
-                    "Cannot start discharge: no export headroom available (%.3f kWh)",
-                    headroom
-                )
-                return
+        # Get export headroom from coordinator
+        if not coordinator.data:
+            _LOGGER.error("Cannot start discharge: no coordinator data available")
+            return
+            
+        headroom = coordinator.data.get(ATTR_EXPORT_HEADROOM, 0)
+        if headroom <= 0:
+            _LOGGER.error(
+                "Cannot start discharge: no export headroom available (%.3f kWh)",
+                headroom
+            )
+            return
 
-        # Set discharge power
+        # Get fixed discharge power capacity from entity
         discharge_power_entity = config_data[CONF_DISCHARGE_POWER]
+        power_state = hass.states.get(discharge_power_entity)
+        if not power_state:
+            _LOGGER.error("Cannot read discharge power from %s", discharge_power_entity)
+            return
+            
+        try:
+            discharge_power_kw = float(power_state.state)
+        except (ValueError, TypeError):
+            _LOGGER.error("Invalid discharge power value: %s", power_state.state)
+            return
+            
+        if discharge_power_kw <= 0:
+            _LOGGER.error("Discharge power must be greater than 0 kW, got: %.3f", discharge_power_kw)
+            return
+
+        # Calculate duration: time (hours) = energy (kWh) / power (kW)
+        duration_hours = headroom / discharge_power_kw
+        duration_minutes = duration_hours * 60
+        
+        _LOGGER.info(
+            "Calculated discharge duration: %.1f minutes (headroom: %.3f kWh ÷ power: %.3f kW)",
+            duration_minutes,
+            headroom,
+            discharge_power_kw,
+        )
+
+        # Set discharge power to the configured value (in kW)
         domain, service = _get_domain_and_service(discharge_power_entity, "set_value")
         await hass.services.async_call(
             domain,
             service,
             {
                 "entity_id": discharge_power_entity,
-                "value": power / 1000,  # Convert W to kW
+                "value": discharge_power_kw,
             },
             blocking=True,
         )
 
-        # Set cutoff SOC to min_soc (always 20% to avoid Alpha ESS grid-switch behavior)
-        discharge_cutoff_entity = config_data[CONF_DISCHARGE_CUTOFF_SOC]
-        domain, service = _get_domain_and_service(discharge_cutoff_entity, "set_value")
-        await hass.services.async_call(
-            domain,
-            service,
-            {
-                "entity_id": discharge_cutoff_entity,
-                "value": min_soc,
-            },
-            blocking=True,
-        )
+        # Set cutoff SOC using the specific Alpha ESS helper entity
+        cutoff_soc_entity = "input_number.alphaess_helper_force_discharging_cutoff_soc"
+        if hass.states.get(cutoff_soc_entity):
+            domain, service = _get_domain_and_service(cutoff_soc_entity, "set_value")
+            await hass.services.async_call(
+                domain,
+                service,
+                {
+                    "entity_id": cutoff_soc_entity,
+                    "value": min_soc,
+                },
+                blocking=True,
+            )
+        else:
+            _LOGGER.warning("Cutoff SOC entity %s not found, skipping", cutoff_soc_entity)
 
         # Set discharge duration (if entity exists)
         # Look for duration entity - common patterns
@@ -238,11 +255,11 @@ async def async_setup_services(
                 service,
                 {
                     "entity_id": duration_entity,
-                    "value": duration,
+                    "value": duration_minutes,
                 },
                 blocking=True,
             )
-            _LOGGER.info("Set discharge duration to %d minutes", duration)
+            _LOGGER.info("Set discharge duration to %.1f minutes", duration_minutes)
 
         # Enable discharge button
         discharge_button_entity = config_data[CONF_DISCHARGE_BUTTON]
@@ -265,9 +282,9 @@ async def async_setup_services(
         coordinator.set_discharge_active(True, current_grid_export, target_energy)
 
         _LOGGER.info(
-            "Started discharge: %.0f W for %.1f min (cutoff SOC: %.0f%%, target: %.3f kWh)",
-            power,
-            duration,
+            "Started discharge: %.3f kW for %.1f min (cutoff SOC: %.0f%%, target: %.3f kWh)",
+            discharge_power_kw,
+            duration_minutes,
             min_soc,
             target_energy,
         )
@@ -309,12 +326,7 @@ async def async_setup_services(
         DOMAIN,
         SERVICE_START_DISCHARGE,
         handle_start_discharge,
-        schema=vol.Schema(
-            {
-                vol.Required("power"): cv.positive_int,
-                vol.Optional("duration"): cv.positive_int,  # Optional - uses calculated duration if not provided
-            }
-        ),
+        schema=vol.Schema({}),  # No parameters - duration calculated automatically
     )
 
     hass.services.async_register(

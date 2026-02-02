@@ -1,27 +1,6 @@
 start_discharge:
   name: Start Discharge
-  description: Start discharging battery to grid to control export levels.
-  fields:
-    power:
-      name: Discharge Power
-      description: Power level to discharge in watts.
-      required: true
-      example: 3000
-      selector:
-        number:
-          min: 0
-          max: 10000
-          unit_of_measurement: "W"
-    duration:
-      name: Duration
-      description: Discharge duration in minutes (default 60).
-      required: false
-      example: 60
-      selector:
-        number:
-          min: 1
-          max: 1440
-          unit_of_measurement: "min"
+  description: Start discharging battery to grid to control export levels. Duration is automatically calculated based on export headroom and configured discharge power capacity.
 
 stop_discharge:
   name: Stop Discharge

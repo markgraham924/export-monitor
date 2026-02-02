@@ -36,4 +36,4 @@ Optional settings:
 - `export_monitor.stop_discharge`: Stop discharge immediately
 - `export_monitor.calculate_discharge`: Recalculate requirements
 
-[Full Documentation](https://github.com/markg/export-monitor)
+[Full Documentation](https://github.com/markgraham924/export-monitor)
