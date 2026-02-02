@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-02-02
+
+### Added
+- **Carbon Intensity (CI) Aware Discharge Planning**: New optional feature that generates discharge plans prioritizing highest-carbon periods within available headroom constraints
+  - New sensors: `CurrentCIValueSensor`, `CurrentCIIndexSensor`, `DischargePlanSensor`
+  - Greedy algorithm allocates discharge windows to highest-CI periods
+  - Respects system constraints: 3.68 kWh max discharge capacity and user-configured power settings
+  - Optional CI forecast sensor configuration
+  - Automatic CI data parsing from forecast JSON
+- **Comprehensive Test Suite**: 71 unit tests covering all core functionality
+  - 20 tests for CI planning (parsing, allocation, algorithm validation)
+  - 51 tests for core features (discharge duration, headroom, buttons, configuration, sensors, energy consistency, edge cases)
+  - 100% pass rate with ~0.14s execution time
+  - GitHub Actions CI/CD workflow for Python 3.11 and 3.12
+- **Updated Documentation**:
+  - Agent instructions (250+ lines of development guidance)
+  - Logo assets (256×256 and 512×512 optimized PNGs)
+  - Comprehensive README with discharge formula explanation
+  - Tests README with coverage details and running instructions
+
+### Changed
+- Discharge formula clarification in documentation: Fixed power (user-configured) with duration scaling linearly with available headroom
+- Updated button logic to check export headroom availability instead of discharge_needed state
+- CI features are fully optional; existing installations unaffected
+
+### Technical Details
+- New coordinator methods: `_parse_ci_forecast()`, `_find_highest_ci_periods()`, `_get_current_ci_index()`
+- CI planning disabled by default; users can optionally enable via config flow
+- Backward compatible: all new features are opt-in
+- Test suite validates algorithm correctness and edge cases
+
 ## [1.2.6] - 2026-02-02
 
 ### Fixed
