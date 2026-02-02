@@ -140,13 +140,30 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
         
         return round(duration_minutes, 1)
 
-    def _parse_ci_forecast(self, sensor_state_str: str) -> dict[str, Any] | None:
-        """Parse Carbon Intensity forecast JSON from sensor state."""
-        try:
-            # Try to parse as JSON first
-            data = json.loads(sensor_state_str)
-        except (json.JSONDecodeError, TypeError):
-            _LOGGER.warning("Could not parse CI forecast sensor as JSON")
+    def _parse_ci_forecast(
+        self, sensor_state_str: str | None, attributes: dict[str, Any] | None = None
+    ) -> dict[str, Any] | None:
+        """Parse Carbon Intensity forecast data from sensor state or attributes."""
+        data: dict[str, Any] | None = None
+
+        # Prefer JSON in state, if present
+        if sensor_state_str:
+            try:
+                data = json.loads(sensor_state_str)
+            except (json.JSONDecodeError, TypeError):
+                data = None
+
+        # Fallback: many sensors store forecast in attributes
+        if data is None and attributes:
+            attr_data = attributes.get("data")
+            if isinstance(attr_data, dict):
+                data = attr_data
+            elif isinstance(attr_data, list):
+                # Some integrations expose list of periods directly
+                return {"periods": attr_data, "region": attributes.get("shortname")}
+
+        if not isinstance(data, dict):
+            _LOGGER.warning("Could not parse CI forecast sensor data")
             return None
 
         if "data" not in data or not isinstance(data.get("data"), dict):
@@ -373,8 +390,11 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
 
         if ci_sensor and enable_ci_planning and target_export > 0:
             ci_state = self.hass.states.get(ci_sensor)
-            if ci_state and ci_state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
-                ci_data = self._parse_ci_forecast(ci_state.state)
+            if ci_state:
+                state_str = None
+                if ci_state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+                    state_str = ci_state.state
+                ci_data = self._parse_ci_forecast(state_str, ci_state.attributes)
                 if ci_data:
                     periods = ci_data.get("periods", [])
                     # Get current CI
