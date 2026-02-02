@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-02-04
+
+### Added
+- **Separate Today/Tomorrow Discharge Plans**: Major redesign of CI planning logic
+  - New sensor: `discharge_plan_today` - Remaining time slots until midnight with actual headroom constraints
+  - New sensor: `discharge_plan_tomorrow` - Full 24-hour plan using Solcast predicted solar
+  - Optional `Solcast Tomorrow` configuration for tomorrow's solar prediction
+  - Both plans now export during **low CI periods** (cleanest grid) instead of high
+  - Today's plan respects actual export headroom; tomorrow's plan optimizes within predicted solar capacity
+
+### Fixed
+- **Config Flow 500 Error**: Integration config/reconfigure now loads without errors
+  - Lenient entity validation - only checks existence, not availability at config time
+  - Proper error handling in reconfigure step
+  - Fixes issue where AlphaESS/Solcast sensors unavailable at startup caused config errors
+
+### Changed
+- **Plan Display Strategy**: Moved from attribute-only display to dedicated sensor entities
+  - Plans now visible in Home Assistant UI (previously hidden in attributes)
+  - Backward compatible: `discharge_plan` sensor still populated (set to today's plan)
+  - Enhanced plan data structure with window-by-window breakdown
+
+### Improved
+- Plan generation algorithm prioritizes clean grid exports (low CI values)
+- Time-aware planning: today's plan only includes remaining slots until midnight
+- Tomorrow's plan uses full 24-hour window with predicted solar
+
 ## [1.3.2] - 2026-02-02
 
 ### Fixed
