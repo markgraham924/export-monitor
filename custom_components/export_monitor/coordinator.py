@@ -166,13 +166,21 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
             _LOGGER.warning("Could not parse CI forecast sensor data")
             return None
 
-        if "data" not in data or not isinstance(data.get("data"), dict):
+        if "data" not in data:
             _LOGGER.warning("CI forecast data missing or invalid structure")
             return None
 
         # Extract time periods
-        periods = data.get("data", {}).get("data", [])
-        if not isinstance(periods, list) or len(periods) == 0:
+        periods: list[dict] | None = None
+        raw_periods = data.get("data")
+        if isinstance(raw_periods, list):
+            periods = raw_periods
+        elif isinstance(raw_periods, dict):
+            nested = raw_periods.get("data", [])
+            if isinstance(nested, list):
+                periods = nested
+
+        if not periods:
             _LOGGER.warning("No CI forecast periods found")
             return None
 
