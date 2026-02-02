@@ -24,6 +24,7 @@ from .const import (
     CONF_RESERVE_SOC_SENSOR,
     CONF_SAFETY_MARGIN,
     CONF_SOLCAST_FORECAST_SO_FAR,
+    CONF_SOLCAST_TOMORROW,
     CONF_SOLCAST_TOTAL_TODAY,
     CONF_TARGET_EXPORT,
     DEFAULT_ENABLE_CI_PLANNING,
@@ -38,14 +39,18 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def _validate_entity(hass: HomeAssistant, entity_id: str) -> bool:
-    """Validate that entity exists and is available."""
-    state = hass.states.get(entity_id)
-    if state is None:
+    """Validate that entity exists (availability check is lenient)."""
+    try:
+        state = hass.states.get(entity_id)
+        # Just check if entity exists; don't require it to be available
+        # (startup dependencies may not be loaded yet)
+        if state is None:
+            _LOGGER.debug("Entity %s not found", entity_id)
+            return False
+        return True
+    except Exception as err:
+        _LOGGER.debug("Error validating entity %s: %s", entity_id, err)
         return False
-    if state.state in ["unknown", "unavailable"]:
-        _LOGGER.warning("Entity %s is %s", entity_id, state.state)
-        return False
-    return True
 
 
 class ExportMonitorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -135,6 +140,11 @@ class ExportMonitorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         domain="sensor",
                     )
                 ),
+                vol.Optional(CONF_SOLCAST_TOMORROW): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain="sensor",
+                    )
+                ),
                 vol.Optional(
                     CONF_TARGET_EXPORT, default=DEFAULT_TARGET_EXPORT
                 ): selector.NumberSelector(
@@ -208,8 +218,12 @@ class ExportMonitorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         # Get the config entry being reconfigured
-        entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
-        if entry is None:
+        try:
+            entry = self.hass.config_entries.async_get_entry(self.context.get("entry_id"))
+            if entry is None:
+                return self.async_abort(reason="entry_not_found")
+        except (KeyError, AttributeError) as err:
+            _LOGGER.error("Error getting config entry for reconfiguration: %s", err)
             return self.async_abort(reason="entry_not_found")
 
         if user_input is not None:
@@ -303,6 +317,15 @@ class ExportMonitorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(
                     CONF_SOLCAST_FORECAST_SO_FAR,
                     default=current_data.get(CONF_SOLCAST_FORECAST_SO_FAR),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain="sensor",
+                        device_class="energy",
+                    )
+                ),
+                vol.Optional(
+                    CONF_SOLCAST_TOMORROW,
+                    default=current_data.get(CONF_SOLCAST_TOMORROW),
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(
                         domain="sensor",

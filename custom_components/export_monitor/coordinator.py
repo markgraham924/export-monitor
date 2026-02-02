@@ -17,6 +17,8 @@ from .const import (
     ATTR_CURRENT_PV,
     ATTR_DISCHARGE_NEEDED,
     ATTR_DISCHARGE_PLAN,
+    ATTR_DISCHARGE_PLAN_TODAY,
+    ATTR_DISCHARGE_PLAN_TOMORROW,
     ATTR_EXPORT_ALLOWED,
     ATTR_EXPORT_HEADROOM,
     ATTR_EXPORTED_TODAY,
@@ -32,6 +34,7 @@ from .const import (
     CONF_RESERVE_SOC_SENSOR,
     CONF_SAFETY_MARGIN,
     CONF_SOLCAST_FORECAST_SO_FAR,
+    CONF_SOLCAST_TOMORROW,
     CONF_SOLCAST_TOTAL_TODAY,
     CONF_TARGET_EXPORT,
     DEFAULT_ENABLE_CI_PLANNING,
@@ -185,6 +188,168 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
             return None
 
         return {"periods": periods, "region": data.get("shortname")}
+
+    def _generate_today_plan(
+        self, 
+        periods: list[dict], 
+        headroom_kwh: float, 
+        discharge_power_kw: float,
+        solar_generated: float,
+        solar_predicted: float,
+    ) -> list[dict]:
+        """Generate discharge plan for today (remaining slots until midnight).
+        
+        Args:
+            periods: CI forecast periods from CI sensor
+            headroom_kwh: Available energy headroom for export
+            discharge_power_kw: Discharge power in kW
+            solar_generated: Solar generated today so far (kWh)
+            solar_predicted: Predicted solar for today (kWh)
+            
+        Returns:
+            List of discharge windows for today
+        """
+        if not periods or headroom_kwh <= 0 or discharge_power_kw <= 0:
+            return []
+
+        now = datetime.now(timezone.utc)
+        today_midnight = now.replace(hour=23, minute=59, second=59)
+        today_energy_budget = max(solar_generated, solar_predicted)
+        
+        # Find periods remaining today
+        future_periods = []
+        for period in periods:
+            try:
+                from_time = datetime.fromisoformat(period["from"].replace("Z", "+00:00"))
+                to_time = datetime.fromisoformat(period["to"].replace("Z", "+00:00"))
+                
+                # Only consider periods that occur today and haven't ended
+                if to_time > now and from_time.date() == now.date():
+                    intensity_forecast = period.get("intensity", {}).get("forecast", 0)
+                    intensity_index = period.get("intensity", {}).get("index", "unknown")
+                    
+                    # Adjust from_time if it's before now
+                    effective_from = max(from_time, now)
+                    
+                    future_periods.append({
+                        "from": effective_from,
+                        "to": to_time,
+                        "duration_minutes": (to_time - effective_from).total_seconds() / 60,
+                        "ci_value": intensity_forecast,
+                        "ci_index": intensity_index,
+                    })
+            except (ValueError, KeyError) as err:
+                _LOGGER.debug("Error parsing CI period: %s", err)
+                continue
+
+        # Sort by CI value (lowest first - we want to export during low CI periods)
+        future_periods.sort(key=lambda x: x["ci_value"])
+
+        # Build plan greedily within headroom
+        plan = []
+        remaining_headroom = min(headroom_kwh, today_energy_budget)
+
+        for period in future_periods:
+            if remaining_headroom <= 0:
+                break
+
+            # Calculate max energy we can export in this period
+            period_capacity_kwh = discharge_power_kw * (period["duration_minutes"] / 60)
+            export_energy = min(period_capacity_kwh, remaining_headroom)
+
+            # Calculate duration to discharge this energy
+            export_duration = (export_energy / discharge_power_kw) * 60
+
+            plan.append({
+                "from": period["from"].isoformat(),
+                "to": period["to"].isoformat(),
+                "duration_minutes": export_duration,
+                "energy_kwh": export_energy,
+                "ci_value": period["ci_value"],
+                "ci_index": period["ci_index"],
+            })
+
+            remaining_headroom -= export_energy
+
+        return plan
+
+    def _generate_tomorrow_plan(
+        self,
+        periods: list[dict],
+        solar_predicted_tomorrow: float,
+        discharge_power_kw: float,
+    ) -> list[dict]:
+        """Generate discharge plan for tomorrow (full 24hrs using predicted solar).
+        
+        Args:
+            periods: CI forecast periods from CI sensor
+            solar_predicted_tomorrow: Predicted solar for tomorrow from Solcast (kWh)
+            discharge_power_kw: Discharge power in kW
+            
+        Returns:
+            List of discharge windows for tomorrow
+        """
+        if not periods or solar_predicted_tomorrow <= 0 or discharge_power_kw <= 0:
+            return []
+
+        now = datetime.now(timezone.utc)
+        tomorrow = now.date() + timedelta(days=1)
+        tomorrow_start = datetime.combine(tomorrow, datetime.min.time()).replace(tzinfo=timezone.utc)
+        tomorrow_midnight = tomorrow_start.replace(hour=23, minute=59, second=59)
+
+        # Find periods for tomorrow
+        future_periods = []
+        for period in periods:
+            try:
+                from_time = datetime.fromisoformat(period["from"].replace("Z", "+00:00"))
+                to_time = datetime.fromisoformat(period["to"].replace("Z", "+00:00"))
+
+                # Only consider periods that occur on tomorrow's date
+                if from_time.date() == tomorrow:
+                    intensity_forecast = period.get("intensity", {}).get("forecast", 0)
+                    intensity_index = period.get("intensity", {}).get("index", "unknown")
+                    
+                    future_periods.append({
+                        "from": from_time,
+                        "to": to_time,
+                        "duration_minutes": (to_time - from_time).total_seconds() / 60,
+                        "ci_value": intensity_forecast,
+                        "ci_index": intensity_index,
+                    })
+            except (ValueError, KeyError) as err:
+                _LOGGER.debug("Error parsing CI period: %s", err)
+                continue
+
+        # Sort by CI value (lowest first - export during low CI periods)
+        future_periods.sort(key=lambda x: x["ci_value"])
+
+        # Build plan greedily using tomorrow's predicted solar as headroom
+        plan = []
+        remaining_headroom = solar_predicted_tomorrow
+
+        for period in future_periods:
+            if remaining_headroom <= 0:
+                break
+
+            # Calculate max energy we can export in this period
+            period_capacity_kwh = discharge_power_kw * (period["duration_minutes"] / 60)
+            export_energy = min(period_capacity_kwh, remaining_headroom)
+
+            # Calculate duration to discharge this energy
+            export_duration = (export_energy / discharge_power_kw) * 60
+
+            plan.append({
+                "from": period["from"].isoformat(),
+                "to": period["to"].isoformat(),
+                "duration_minutes": export_duration,
+                "energy_kwh": export_energy,
+                "ci_value": period["ci_value"],
+                "ci_index": period["ci_index"],
+            })
+
+            remaining_headroom -= export_energy
+
+        return plan
 
     def _find_highest_ci_periods(
         self, periods: list[dict], headroom_kwh: float, discharge_power_kw: float
@@ -388,8 +553,9 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                     )
                 )
 
-        # CI Planning (optional feature)
-        discharge_plan = []
+        # CI Planning (optional feature) - generate today and tomorrow plans
+        discharge_plan_today = []
+        discharge_plan_tomorrow = []
         current_ci_value = None
         current_ci_index = None
 
@@ -407,16 +573,41 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                     periods = ci_data.get("periods", [])
                     # Get current CI
                     current_ci_value, current_ci_index = self._get_current_ci_index(periods)
-                    # Generate discharge plan for highest CI periods
-                    if headroom_kwh > 0 and target_export > 0:
-                        discharge_power_kw = target_export / 1000
-                        discharge_plan = self._find_highest_ci_periods(
-                            periods, headroom_kwh, discharge_power_kw
+                    
+                    discharge_power_kw = target_export / 1000
+                    
+                    # Generate plan for today (remaining hours until midnight)
+                    if headroom_kwh > 0:
+                        discharge_plan_today = self._generate_today_plan(
+                            periods,
+                            headroom_kwh,
+                            discharge_power_kw,
+                            pv_energy_today,
+                            solcast_total_today,
                         )
                         _LOGGER.debug(
-                            "Generated CI discharge plan: %d periods, %.3f kWh total",
-                            len(discharge_plan),
-                            sum(p.get("energy_kwh", 0) for p in discharge_plan),
+                            "Generated today's CI discharge plan: %d periods, %.3f kWh total",
+                            len(discharge_plan_today),
+                            sum(p.get("energy_kwh", 0) for p in discharge_plan_today),
+                        )
+                    
+                    # Generate plan for tomorrow using predicted solar
+                    solcast_tomorrow = config_data.get(CONF_SOLCAST_TOMORROW)
+                    solcast_tomorrow_value = (
+                        self._get_sensor_value(solcast_tomorrow)
+                        if solcast_tomorrow
+                        else None
+                    )
+                    if solcast_tomorrow_value and solcast_tomorrow_value > 0:
+                        discharge_plan_tomorrow = self._generate_tomorrow_plan(
+                            periods,
+                            solcast_tomorrow_value,
+                            discharge_power_kw,
+                        )
+                        _LOGGER.debug(
+                            "Generated tomorrow's CI discharge plan: %d periods, %.3f kWh total",
+                            len(discharge_plan_tomorrow),
+                            sum(p.get("energy_kwh", 0) for p in discharge_plan_tomorrow),
                         )
 
         return {
@@ -429,7 +620,9 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
             ATTR_LAST_CALCULATION: self.hass.states.get("sensor.date_time_iso").state
             if self.hass.states.get("sensor.date_time_iso")
             else None,
-            ATTR_DISCHARGE_PLAN: discharge_plan,
+            ATTR_DISCHARGE_PLAN: discharge_plan_today,  # Keep backward compatibility
+            ATTR_DISCHARGE_PLAN_TODAY: discharge_plan_today,
+            ATTR_DISCHARGE_PLAN_TOMORROW: discharge_plan_tomorrow,
             ATTR_CURRENT_CI_VALUE: current_ci_value,
             ATTR_CURRENT_CI_INDEX: current_ci_index,
             "reserve_limit_reached": reserve_limit_reached,

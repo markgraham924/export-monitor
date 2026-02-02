@@ -23,6 +23,8 @@ from .const import (
     ATTR_CURRENT_PV,
     ATTR_DISCHARGE_NEEDED,
     ATTR_DISCHARGE_PLAN,
+    ATTR_DISCHARGE_PLAN_TODAY,
+    ATTR_DISCHARGE_PLAN_TOMORROW,
     ATTR_EXPORT_ALLOWED,
     ATTR_EXPORT_HEADROOM,
     ATTR_EXPORTED_TODAY,
@@ -55,6 +57,8 @@ async def async_setup_entry(
             CurrentCIValueSensor(coordinator, entry),
             CurrentCIIndexSensor(coordinator, entry),
             DischargePlanSensor(coordinator, entry),
+            DischargePlanTodaySensor(coordinator, entry),
+            DischargePlanTomorrowSensor(coordinator, entry),
         ]
     )
 
@@ -481,6 +485,112 @@ class DischargePlanSensor(ExportMonitorSensor):
             return {}
 
         plan = self.coordinator.data.get(ATTR_DISCHARGE_PLAN, [])
+        if not plan:
+            return {"plan": []}
+
+        return {
+            "plan": plan,
+            "total_energy_kwh": sum(p.get("energy_kwh", 0) for p in plan),
+            "windows": len(plan),
+        }
+
+
+class DischargePlanTodaySensor(ExportMonitorSensor):
+    """Sensor showing discharge plan for today (remaining hours until midnight)."""
+
+    def __init__(
+        self,
+        coordinator: ExportMonitorCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        """Initialize the discharge plan today sensor."""
+        super().__init__(
+            coordinator,
+            entry,
+            "discharge_plan_today",
+            "Discharge Plan Today",
+            "mdi:battery-charging-outline",
+        )
+
+    @property
+    def native_value(self) -> str:
+        """Return plan summary."""
+        if not self.coordinator.data:
+            return "No plan"
+
+        plan = self.coordinator.data.get(ATTR_DISCHARGE_PLAN_TODAY, [])
+        if not plan:
+            return "No plan"
+
+        total_energy = sum(p.get("energy_kwh", 0) for p in plan)
+        avg_ci = (
+            sum(p.get("ci_value", 0) * p.get("energy_kwh", 0) for p in plan) / total_energy
+            if total_energy > 0
+            else 0
+        )
+
+        return f"{len(plan)} windows, {total_energy:.2f} kWh, avg CI {avg_ci:.0f}"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return detailed plan."""
+        if not self.coordinator.data:
+            return {}
+
+        plan = self.coordinator.data.get(ATTR_DISCHARGE_PLAN_TODAY, [])
+        if not plan:
+            return {"plan": []}
+
+        return {
+            "plan": plan,
+            "total_energy_kwh": sum(p.get("energy_kwh", 0) for p in plan),
+            "windows": len(plan),
+        }
+
+
+class DischargePlanTomorrowSensor(ExportMonitorSensor):
+    """Sensor showing discharge plan for tomorrow (full 24hrs using predicted solar)."""
+
+    def __init__(
+        self,
+        coordinator: ExportMonitorCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        """Initialize the discharge plan tomorrow sensor."""
+        super().__init__(
+            coordinator,
+            entry,
+            "discharge_plan_tomorrow",
+            "Discharge Plan Tomorrow",
+            "mdi:battery-charging-outline",
+        )
+
+    @property
+    def native_value(self) -> str:
+        """Return plan summary."""
+        if not self.coordinator.data:
+            return "No plan"
+
+        plan = self.coordinator.data.get(ATTR_DISCHARGE_PLAN_TOMORROW, [])
+        if not plan:
+            return "No plan"
+
+        total_energy = sum(p.get("energy_kwh", 0) for p in plan)
+        avg_ci = (
+            sum(p.get("ci_value", 0) * p.get("energy_kwh", 0) for p in plan) / total_energy
+            if total_energy > 0
+            else 0
+        )
+
+        return f"{len(plan)} windows, {total_energy:.2f} kWh, avg CI {avg_ci:.0f}"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return detailed plan."""
+        if not self.coordinator.data:
+            return {}
+
+        plan = self.coordinator.data.get(ATTR_DISCHARGE_PLAN_TOMORROW, [])
         if not plan:
             return {"plan": []}
 
