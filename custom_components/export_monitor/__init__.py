@@ -181,22 +181,13 @@ async def async_setup_services(
             )
             return
 
-        # Get fixed discharge power capacity from entity
-        discharge_power_entity = config_data[CONF_DISCHARGE_POWER]
-        power_state = hass.states.get(discharge_power_entity)
-        if not power_state:
-            _LOGGER.error("Cannot read discharge power from %s", discharge_power_entity)
+        # Use target export power as the fixed discharge power
+        target_export_w = config_data.get(CONF_TARGET_EXPORT, DEFAULT_TARGET_EXPORT)
+        if target_export_w <= 0:
+            _LOGGER.error("Cannot start discharge: target export power must be > 0 W")
             return
-            
-        try:
-            discharge_power_kw = float(power_state.state)
-        except (ValueError, TypeError):
-            _LOGGER.error("Invalid discharge power value: %s", power_state.state)
-            return
-            
-        if discharge_power_kw <= 0:
-            _LOGGER.error("Discharge power must be greater than 0 kW, got: %.3f", discharge_power_kw)
-            return
+
+        discharge_power_kw = target_export_w / 1000
 
         # Calculate duration: time (hours) = energy (kWh) / power (kW)
         duration_hours = headroom / discharge_power_kw
@@ -209,7 +200,8 @@ async def async_setup_services(
             discharge_power_kw,
         )
 
-        # Set discharge power to the configured value (in kW)
+        # Set discharge power to match target export power (in kW)
+        discharge_power_entity = config_data[CONF_DISCHARGE_POWER]
         domain, service = _get_domain_and_service(discharge_power_entity, "set_value")
         await hass.services.async_call(
             domain,
