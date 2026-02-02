@@ -17,15 +17,19 @@ CONF_MIN_SOC: Final = "min_soc"
 CONF_SAFETY_MARGIN: Final = "safety_margin"
 CONF_RESERVE_SOC_SENSOR: Final = "reserve_soc_sensor"  # Optional
 CONF_OBSERVE_RESERVE_SOC: Final = "observe_reserve_soc"  # Boolean
+CONF_CI_FORECAST_SENSOR: Final = "ci_forecast_sensor"  # Optional - Carbon Intensity
+CONF_ENABLE_CI_PLANNING: Final = "enable_ci_planning"  # Boolean
 
 # Service names
 SERVICE_START_DISCHARGE: Final = "start_discharge"
 SERVICE_STOP_DISCHARGE: Final = "stop_discharge"
 SERVICE_CALCULATE_DISCHARGE: Final = "calculate_discharge"
+SERVICE_EXECUTE_DISCHARGE_PLAN: Final = "execute_discharge_plan"
 
 # Default values
 DEFAULT_TARGET_EXPORT: Final = 0  # Watts
 DEFAULT_OBSERVE_RESERVE_SOC: Final = False  # Disabled by default
+DEFAULT_ENABLE_CI_PLANNING: Final = False  # Disabled by default
 DEFAULT_MIN_SOC: Final = 20  # Percent
 DEFAULT_SAFETY_MARGIN: Final = 0.5  # kWh (0.5 kWh margin)
 DEFAULT_SCAN_INTERVAL: Final = 10  # Seconds
@@ -38,3 +42,6 @@ ATTR_DISCHARGE_NEEDED: Final = "discharge_needed"
 ATTR_CURRENT_PV: Final = "current_pv_kwh"
 ATTR_FORECAST_PV: Final = "forecast_pv_kwh"
 ATTR_LAST_CALCULATION: Final = "last_calculation"
+ATTR_DISCHARGE_PLAN: Final = "discharge_plan"
+ATTR_CURRENT_CI_INDEX: Final = "current_ci_index"
+ATTR_CURRENT_CI_VALUE: Final = "current_ci_value"

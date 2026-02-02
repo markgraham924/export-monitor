@@ -15,6 +15,8 @@ from .const import (
     CONF_DISCHARGE_BUTTON,
     CONF_DISCHARGE_CUTOFF_SOC,
     CONF_DISCHARGE_POWER,
+    CONF_CI_FORECAST_SENSOR,
+    CONF_ENABLE_CI_PLANNING,
     CONF_GRID_FEED_TODAY,
     CONF_MIN_SOC,
     CONF_OBSERVE_RESERVE_SOC,
@@ -24,6 +26,7 @@ from .const import (
     CONF_SOLCAST_FORECAST_SO_FAR,
     CONF_SOLCAST_TOTAL_TODAY,
     CONF_TARGET_EXPORT,
+    DEFAULT_ENABLE_CI_PLANNING,
     DEFAULT_MIN_SOC,
     DEFAULT_OBSERVE_RESERVE_SOC,
     DEFAULT_SAFETY_MARGIN,
@@ -172,6 +175,14 @@ class ExportMonitorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ),
                 vol.Optional(
                     CONF_OBSERVE_RESERVE_SOC, default=DEFAULT_OBSERVE_RESERVE_SOC
+                ): selector.BooleanSelector(),
+                vol.Optional(CONF_CI_FORECAST_SENSOR): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain="sensor",
+                    )
+                ),
+                vol.Optional(
+                    CONF_ENABLE_CI_PLANNING, default=DEFAULT_ENABLE_CI_PLANNING
                 ): selector.BooleanSelector(),
             }
         )

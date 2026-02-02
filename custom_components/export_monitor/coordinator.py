@@ -1,7 +1,8 @@
 """Data update coordinator for Energy Export Monitor."""
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
+import json
 import logging
 from typing import Any
 
@@ -11,14 +12,19 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
+    ATTR_CURRENT_CI_INDEX,
+    ATTR_CURRENT_CI_VALUE,
     ATTR_CURRENT_PV,
     ATTR_DISCHARGE_NEEDED,
+    ATTR_DISCHARGE_PLAN,
     ATTR_EXPORT_ALLOWED,
     ATTR_EXPORT_HEADROOM,
     ATTR_EXPORTED_TODAY,
     ATTR_FORECAST_PV,
     ATTR_LAST_CALCULATION,
+    CONF_CI_FORECAST_SENSOR,
     CONF_CURRENT_SOC,
+    CONF_ENABLE_CI_PLANNING,
     CONF_GRID_FEED_TODAY,
     CONF_MIN_SOC,
     CONF_OBSERVE_RESERVE_SOC,
@@ -28,6 +34,7 @@ from .const import (
     CONF_SOLCAST_FORECAST_SO_FAR,
     CONF_SOLCAST_TOTAL_TODAY,
     CONF_TARGET_EXPORT,
+    DEFAULT_ENABLE_CI_PLANNING,
     DEFAULT_MIN_SOC,
     DEFAULT_OBSERVE_RESERVE_SOC,
     DEFAULT_SAFETY_MARGIN,
@@ -132,6 +139,110 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
         )
         
         return round(duration_minutes, 1)
+
+    def _parse_ci_forecast(self, sensor_state_str: str) -> dict[str, Any] | None:
+        """Parse Carbon Intensity forecast JSON from sensor state."""
+        try:
+            # Try to parse as JSON first
+            data = json.loads(sensor_state_str)
+        except (json.JSONDecodeError, TypeError):
+            _LOGGER.warning("Could not parse CI forecast sensor as JSON")
+            return None
+
+        if "data" not in data or not isinstance(data.get("data"), dict):
+            _LOGGER.warning("CI forecast data missing or invalid structure")
+            return None
+
+        # Extract time periods
+        periods = data.get("data", {}).get("data", [])
+        if not isinstance(periods, list) or len(periods) == 0:
+            _LOGGER.warning("No CI forecast periods found")
+            return None
+
+        return {"periods": periods, "region": data.get("shortname")}
+
+    def _find_highest_ci_periods(
+        self, periods: list[dict], headroom_kwh: float, discharge_power_kw: float
+    ) -> list[dict]:
+        """Find and rank highest CI periods, build discharge plan within headroom."""
+        if not periods or headroom_kwh <= 0 or discharge_power_kw <= 0:
+            return []
+
+        now = datetime.now(timezone.utc)
+        future_periods = []
+
+        for period in periods:
+            try:
+                from_time = datetime.fromisoformat(period["from"].replace("Z", "+00:00"))
+                to_time = datetime.fromisoformat(period["to"].replace("Z", "+00:00"))
+                intensity_forecast = period.get("intensity", {}).get("forecast", 0)
+                intensity_index = period.get("intensity", {}).get("index", "unknown")
+
+                # Only consider future periods
+                if to_time > now:
+                    future_periods.append(
+                        {
+                            "from": from_time,
+                            "to": to_time,
+                            "duration_minutes": (to_time - from_time).total_seconds() / 60,
+                            "ci_value": intensity_forecast,
+                            "ci_index": intensity_index,
+                        }
+                    )
+            except (ValueError, KeyError) as err:
+                _LOGGER.debug("Error parsing CI period: %s", err)
+                continue
+
+        # Sort by CI value (highest first)
+        future_periods.sort(key=lambda x: x["ci_value"], reverse=True)
+
+        # Build plan greedily within headroom
+        plan = []
+        remaining_headroom = headroom_kwh
+
+        for period in future_periods:
+            if remaining_headroom <= 0:
+                break
+
+            # Calculate max energy we can export in this period
+            period_capacity_kwh = discharge_power_kw * (period["duration_minutes"] / 60)
+            export_energy = min(period_capacity_kwh, remaining_headroom)
+
+            # Calculate duration to discharge this energy
+            export_duration = (export_energy / discharge_power_kw) * 60
+
+            plan.append(
+                {
+                    "from": period["from"].isoformat(),
+                    "to": period["to"].isoformat(),
+                    "duration_minutes": export_duration,
+                    "energy_kwh": export_energy,
+                    "ci_value": period["ci_value"],
+                    "ci_index": period["ci_index"],
+                }
+            )
+
+            remaining_headroom -= export_energy
+
+        return plan
+
+    def _get_current_ci_index(self, periods: list[dict]) -> tuple[int | None, str | None]:
+        """Get current CI intensity value and index."""
+        now = datetime.now(timezone.utc)
+
+        for period in periods:
+            try:
+                from_time = datetime.fromisoformat(period["from"].replace("Z", "+00:00"))
+                to_time = datetime.fromisoformat(period["to"].replace("Z", "+00:00"))
+
+                if from_time <= now < to_time:
+                    ci_value = period.get("intensity", {}).get("forecast", None)
+                    ci_index = period.get("intensity", {}).get("index", None)
+                    return ci_value, ci_index
+            except (ValueError, KeyError):
+                continue
+
+        return None, None
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from sensors and calculate discharge requirements."""
@@ -252,6 +363,34 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                     )
                 )
 
+        # CI Planning (optional feature)
+        discharge_plan = []
+        current_ci_value = None
+        current_ci_index = None
+
+        ci_sensor = config_data.get(CONF_CI_FORECAST_SENSOR)
+        enable_ci_planning = config_data.get(CONF_ENABLE_CI_PLANNING, DEFAULT_ENABLE_CI_PLANNING)
+
+        if ci_sensor and enable_ci_planning and target_export > 0:
+            ci_state = self.hass.states.get(ci_sensor)
+            if ci_state and ci_state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+                ci_data = self._parse_ci_forecast(ci_state.state)
+                if ci_data:
+                    periods = ci_data.get("periods", [])
+                    # Get current CI
+                    current_ci_value, current_ci_index = self._get_current_ci_index(periods)
+                    # Generate discharge plan for highest CI periods
+                    if headroom_kwh > 0 and target_export > 0:
+                        discharge_power_kw = target_export / 1000
+                        discharge_plan = self._find_highest_ci_periods(
+                            periods, headroom_kwh, discharge_power_kw
+                        )
+                        _LOGGER.debug(
+                            "Generated CI discharge plan: %d periods, %.3f kWh total",
+                            len(discharge_plan),
+                            sum(p.get("energy_kwh", 0) for p in discharge_plan),
+                        )
+
         return {
             ATTR_EXPORT_HEADROOM: headroom_kwh,
             ATTR_EXPORT_ALLOWED: export_cap_kwh,
@@ -262,13 +401,9 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
             ATTR_LAST_CALCULATION: self.hass.states.get("sensor.date_time_iso").state
             if self.hass.states.get("sensor.date_time_iso")
             else None,
-            "current_soc": current_soc,
-            "min_soc": min_soc,
-            "target_export": target_export,
-            "solcast_forecast_so_far": solcast_forecast_so_far_value,
-            "calculated_duration": calculated_duration_minutes,
-            "discharge_complete": discharge_complete,
-            "reserve_soc_target": reserve_soc_target,
+            ATTR_DISCHARGE_PLAN: discharge_plan,
+            ATTR_CURRENT_CI_VALUE: current_ci_value,
+            ATTR_CURRENT_CI_INDEX: current_ci_index,
             "reserve_limit_reached": reserve_limit_reached,
             "observe_reserve_soc": observe_reserve_soc,
         }

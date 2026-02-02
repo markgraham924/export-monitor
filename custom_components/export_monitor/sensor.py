@@ -18,8 +18,11 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
+    ATTR_CURRENT_CI_INDEX,
+    ATTR_CURRENT_CI_VALUE,
     ATTR_CURRENT_PV,
     ATTR_DISCHARGE_NEEDED,
+    ATTR_DISCHARGE_PLAN,
     ATTR_EXPORT_ALLOWED,
     ATTR_EXPORT_HEADROOM,
     ATTR_EXPORTED_TODAY,
@@ -49,6 +52,9 @@ async def async_setup_entry(
             DischargeCompleteSensor(coordinator, entry),
             ReserveSOCTargetSensor(coordinator, entry),
             ReserveSOCStatusSensor(coordinator, entry),
+            CurrentCIValueSensor(coordinator, entry),
+            CurrentCIIndexSensor(coordinator, entry),
+            DischargePlanSensor(coordinator, entry),
         ]
     )
 
@@ -370,3 +376,117 @@ class ReserveSOCStatusSensor(ExportMonitorSensor):
             "observe_reserve_soc": self.coordinator.data.get("observe_reserve_soc"),
             "reserve_limit_reached": self.coordinator.data.get("reserve_limit_reached"),
         }
+
+
+class CurrentCIValueSensor(ExportMonitorSensor):
+    """Sensor showing current Carbon Intensity value (gCO2/kWh)."""
+
+    def __init__(
+        self,
+        coordinator: ExportMonitorCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        """Initialize the current CI value sensor."""
+        super().__init__(
+            coordinator,
+            entry,
+            "current_ci_value",
+            "Current Carbon Intensity",
+            "mdi:leaf",
+        )
+
+    @property
+    def native_value(self) -> int | None:
+        """Return current CI value."""
+        if not self.coordinator.data:
+            return None
+        return self.coordinator.data.get(ATTR_CURRENT_CI_VALUE)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional attributes."""
+        if not self.coordinator.data:
+            return {}
+
+        return {
+            "ci_index": self.coordinator.data.get(ATTR_CURRENT_CI_INDEX),
+        }
+
+
+class CurrentCIIndexSensor(ExportMonitorSensor):
+    """Sensor showing current Carbon Intensity index (very low/low/etc)."""
+
+    def __init__(
+        self,
+        coordinator: ExportMonitorCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        """Initialize the current CI index sensor."""
+        super().__init__(
+            coordinator,
+            entry,
+            "current_ci_index",
+            "Current Carbon Intensity Index",
+            "mdi:leaf-circle",
+        )
+
+    @property
+    def native_value(self) -> str | None:
+        """Return current CI index."""
+        if not self.coordinator.data:
+            return None
+        return self.coordinator.data.get(ATTR_CURRENT_CI_INDEX)
+
+
+class DischargePlanSensor(ExportMonitorSensor):
+    """Sensor showing optimized discharge plan for highest CI periods."""
+
+    def __init__(
+        self,
+        coordinator: ExportMonitorCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        """Initialize the discharge plan sensor."""
+        super().__init__(
+            coordinator,
+            entry,
+            "discharge_plan",
+            "Discharge Plan",
+            "mdi:battery-charging-outline",
+        )
+
+    @property
+    def native_value(self) -> str:
+        """Return plan summary."""
+        if not self.coordinator.data:
+            return "No plan"
+
+        plan = self.coordinator.data.get(ATTR_DISCHARGE_PLAN, [])
+        if not plan:
+            return "No plan"
+
+        total_energy = sum(p.get("energy_kwh", 0) for p in plan)
+        avg_ci = (
+            sum(p.get("ci_value", 0) * p.get("energy_kwh", 0) for p in plan) / total_energy
+            if total_energy > 0
+            else 0
+        )
+
+        return f"{len(plan)} windows, {total_energy:.2f} kWh, avg CI {avg_ci:.0f}"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return detailed plan."""
+        if not self.coordinator.data:
+            return {}
+
+        plan = self.coordinator.data.get(ATTR_DISCHARGE_PLAN, [])
+        if not plan:
+            return {"plan": []}
+
+        return {
+            "plan": plan,
+            "total_energy_kwh": sum(p.get("energy_kwh", 0) for p in plan),
+            "windows": len(plan),
+        }
+
