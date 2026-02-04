@@ -984,7 +984,7 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                 current_soc,
                 solcast_total_today,
                 target_export_kwh,
-                min_soc_percent,
+                min_soc,
                 safety_margin,
                 discharge_power_kw,
             )
@@ -1009,7 +1009,7 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
             "reserve_limit_reached": reserve_limit_reached,
             "observe_reserve_soc": observe_reserve_soc,
             "current_soc": current_soc,
-            "min_soc": min_soc_percent,
+            "min_soc": min_soc,
             "reserve_soc_target": reserve_soc_target,
         }
 
