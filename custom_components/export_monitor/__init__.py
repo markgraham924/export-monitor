@@ -132,6 +132,18 @@ async def async_setup_services(
 ) -> None:
     """Set up services for the integration."""
 
+    async def _send_critical_notification(title: str, message: str, notification_id: str) -> None:
+        """Send a persistent notification for critical errors."""
+        await hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "title": f"⚠️ Export Monitor: {title}",
+                "message": message,
+                "notification_id": f"export_monitor_{notification_id}",
+            },
+        )
+
     def _get_domain_and_service(entity_id: str, service_type: str) -> tuple[str, str]:
         """Get the correct domain and service for an entity."""
         domain = entity_id.split(".")[0]
@@ -160,6 +172,14 @@ async def async_setup_services(
             )
             # Set error state in coordinator
             coordinator.set_error_state("soc_read_failed")
+            # Send critical notification
+            await _send_critical_notification(
+                "SOC Sensor Failed",
+                f"Unable to read valid battery SOC from {current_soc_entity}. "
+                "Discharge cannot start until this is resolved. "
+                "Check your battery sensor configuration.",
+                "soc_read_failed",
+            )
             return
 
         # Safety check - don't discharge if SOC too low
@@ -178,6 +198,14 @@ async def async_setup_services(
                 coordinator.get_data_age() or 0,
             )
             coordinator.set_error_state("stale_data")
+            await _send_critical_notification(
+                "Stale Data Detected",
+                f"Coordinator data is stale (age: {coordinator.get_data_age():.1f}s). "
+                "This indicates a problem with sensor updates. "
+                "Discharge cannot start with outdated data to prevent export limit breaches. "
+                "Check system health sensor for details.",
+                "stale_data",
+            )
             return
 
         # Get export headroom from coordinator
@@ -232,6 +260,13 @@ async def async_setup_services(
         if not success:
             _LOGGER.error("Failed to set discharge power, aborting start discharge")
             coordinator.set_error_state("discharge_power_set_failed")
+            await _send_critical_notification(
+                "Discharge Power Set Failed",
+                f"Failed to set discharge power to {discharge_power_kw:.2f}kW on entity {discharge_power_entity}. "
+                "This indicates a problem with the battery control system. "
+                "Discharge has been aborted to prevent unpredictable behavior.",
+                "discharge_power_failed",
+            )
             return
 
         # Set cutoff SOC using the specific Alpha ESS helper entity
@@ -298,6 +333,13 @@ async def async_setup_services(
         if not success:
             _LOGGER.error("Failed to enable discharge button, discharge may not start")
             coordinator.set_error_state("discharge_start_failed")
+            await _send_critical_notification(
+                "Discharge Start Failed",
+                f"Failed to enable discharge on entity {discharge_button_entity}. "
+                "Battery discharge has not started. "
+                "Check battery control system and entity configuration.",
+                "discharge_start_failed",
+            )
             return
 
         # Get current grid export for tracking with validation
@@ -311,6 +353,36 @@ async def async_setup_services(
         
         coordinator.set_discharge_active(True, current_grid_export, target_energy)
         coordinator.clear_error_state()
+        
+        # Clear any previous error notifications
+        await hass.services.async_call(
+            "persistent_notification",
+            "dismiss",
+            {
+                "notification_id": "export_monitor_soc_read_failed",
+            },
+        )
+        await hass.services.async_call(
+            "persistent_notification",
+            "dismiss",
+            {
+                "notification_id": "export_monitor_stale_data",
+            },
+        )
+        await hass.services.async_call(
+            "persistent_notification",
+            "dismiss",
+            {
+                "notification_id": "export_monitor_discharge_power_failed",
+            },
+        )
+        await hass.services.async_call(
+            "persistent_notification",
+            "dismiss",
+            {
+                "notification_id": "export_monitor_discharge_start_failed",
+            },
+        )
 
         _LOGGER.info(
             "Started discharge: %.3f kW for %.1f min (cutoff SOC: %.0f%%, target: %.3f kWh)",
@@ -337,10 +409,26 @@ async def async_setup_services(
         if not success:
             _LOGGER.error("Failed to disable discharge button, discharge may still be active")
             coordinator.set_error_state("discharge_stop_failed")
+            await _send_critical_notification(
+                "Discharge Stop Failed",
+                f"Failed to disable discharge on entity {discharge_button_entity}. "
+                "Battery may still be discharging! "
+                "Check battery immediately and stop discharge manually if needed.",
+                "discharge_stop_failed",
+            )
             return
 
         coordinator.set_discharge_active(False)
         coordinator.clear_error_state()
+        
+        # Clear stop failure notification if it exists
+        await hass.services.async_call(
+            "persistent_notification",
+            "dismiss",
+            {
+                "notification_id": "export_monitor_discharge_stop_failed",
+            },
+        )
 
         _LOGGER.info("Stopped discharge")
 
