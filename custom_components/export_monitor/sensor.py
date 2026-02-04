@@ -94,7 +94,6 @@ class ExportMonitorSensor(CoordinatorEntity, SensorEntity):
 class ExportHeadroomSensor(ExportMonitorSensor):
     """Sensor showing remaining export headroom (kWh)."""
 
-    _attr_device_class = SensorDeviceClass.ENERGY
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_state_class = SensorStateClass.MEASUREMENT
 
