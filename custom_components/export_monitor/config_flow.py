@@ -209,6 +209,26 @@ class ExportMonitorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(
                     CONF_EXPORT_WINDOW_END, default=DEFAULT_EXPORT_WINDOW_END
                 ): selector.TimeSelector(),
+                vol.Optional(
+                    CONF_ENABLE_CHARGE_PLANNING, default=DEFAULT_ENABLE_CHARGE_PLANNING
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_CHARGE_WINDOW_START, default=DEFAULT_CHARGE_WINDOW_START
+                ): selector.TimeSelector(),
+                vol.Optional(
+                    CONF_CHARGE_WINDOW_END, default=DEFAULT_CHARGE_WINDOW_END
+                ): selector.TimeSelector(),
+                vol.Optional(
+                    CONF_CHARGE_POWER_KW, default=DEFAULT_CHARGE_POWER_KW
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0.1,
+                        max=10.0,
+                        step=0.01,
+                        unit_of_measurement="kW",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
             }
         )
 
@@ -417,6 +437,30 @@ class ExportMonitorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_EXPORT_WINDOW_END,
                     default=current_data.get(CONF_EXPORT_WINDOW_END, DEFAULT_EXPORT_WINDOW_END),
                 ): selector.TimeSelector(),
+                vol.Optional(
+                    CONF_ENABLE_CHARGE_PLANNING,
+                    default=current_data.get(CONF_ENABLE_CHARGE_PLANNING, DEFAULT_ENABLE_CHARGE_PLANNING),
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_CHARGE_WINDOW_START,
+                    default=current_data.get(CONF_CHARGE_WINDOW_START, DEFAULT_CHARGE_WINDOW_START),
+                ): selector.TimeSelector(),
+                vol.Optional(
+                    CONF_CHARGE_WINDOW_END,
+                    default=current_data.get(CONF_CHARGE_WINDOW_END, DEFAULT_CHARGE_WINDOW_END),
+                ): selector.TimeSelector(),
+                vol.Optional(
+                    CONF_CHARGE_POWER_KW,
+                    default=current_data.get(CONF_CHARGE_POWER_KW, DEFAULT_CHARGE_POWER_KW),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0.1,
+                        max=10.0,
+                        step=0.01,
+                        unit_of_measurement="kW",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
             }
         )
 
@@ -508,6 +552,30 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     CONF_EXPORT_WINDOW_END,
                     default=current_data.get(CONF_EXPORT_WINDOW_END, DEFAULT_EXPORT_WINDOW_END),
                 ): selector.TimeSelector(),
+                vol.Optional(
+                    CONF_ENABLE_CHARGE_PLANNING,
+                    default=current_data.get(CONF_ENABLE_CHARGE_PLANNING, DEFAULT_ENABLE_CHARGE_PLANNING),
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_CHARGE_WINDOW_START,
+                    default=current_data.get(CONF_CHARGE_WINDOW_START, DEFAULT_CHARGE_WINDOW_START),
+                ): selector.TimeSelector(),
+                vol.Optional(
+                    CONF_CHARGE_WINDOW_END,
+                    default=current_data.get(CONF_CHARGE_WINDOW_END, DEFAULT_CHARGE_WINDOW_END),
+                ): selector.TimeSelector(),
+                vol.Optional(
+                    CONF_CHARGE_POWER_KW,
+                    default=current_data.get(CONF_CHARGE_POWER_KW, DEFAULT_CHARGE_POWER_KW),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0.1,
+                        max=10.0,
+                        step=0.01,
+                        unit_of_measurement="kW",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
             }
         )
 
