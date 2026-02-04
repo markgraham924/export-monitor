@@ -1008,6 +1008,9 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
             ATTR_CURRENT_CI_INDEX: current_ci_index,
             "reserve_limit_reached": reserve_limit_reached,
             "observe_reserve_soc": observe_reserve_soc,
+            "current_soc": current_soc,
+            "min_soc": min_soc_percent,
+            "reserve_soc_target": reserve_soc_target,
         }
 
     @property
