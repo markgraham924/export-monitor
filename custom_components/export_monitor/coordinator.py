@@ -616,14 +616,17 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
             next_window_end = datetime.combine(next_window_start.date() + timedelta(days=1), window_end_time, tzinfo=timezone.utc)
         
         _LOGGER.debug(
-            "Next charge window: %s to %s (current time: %s)",
+            "Next charge window: %s to %s (current time: %s, window config: %s-%s)",
             next_window_start.isoformat(),
             next_window_end.isoformat(),
             now.isoformat(),
+            charge_window_start,
+            charge_window_end,
         )
         
         # Filter periods to those within the next charge window
         filtered_periods = []
+        _LOGGER.debug("Total periods available: %d", len(periods))
         for period in periods:
             try:
                 from_time = datetime.fromisoformat(period["from"].replace("Z", "+00:00"))
@@ -631,6 +634,13 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                 
                 # Check if period overlaps with next charge window
                 if to_time < next_window_start or from_time > next_window_end:
+                    _LOGGER.debug(
+                        "Period %s-%s outside window (window: %s-%s)",
+                        from_time.isoformat(),
+                        to_time.isoformat(),
+                        next_window_start.isoformat(),
+                        next_window_end.isoformat(),
+                    )
                     continue
                 
                 # Trim period to window boundaries
@@ -638,9 +648,11 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                 actual_end = min(to_time, next_window_end)
                 
                 if actual_start >= actual_end:
+                    _LOGGER.debug("Period trimmed to zero duration")
                     continue
                 
                 ci_value = period.get("intensity", {}).get("forecast", 0)
+                _LOGGER.debug("Including period %s-%s CI:%d", actual_start.isoformat(), actual_end.isoformat(), ci_value)
                 filtered_periods.append({
                     "from": actual_start,
                     "to": actual_end,
@@ -649,6 +661,15 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
             except (ValueError, KeyError) as err:
                 _LOGGER.debug("Skipping invalid period: %s", err)
                 continue
+        
+        _LOGGER.info(
+            "Charge window %s-%s: found %d matching periods out of %d total (energy needed: %.2f kWh)",
+            charge_window_start,
+            charge_window_end,
+            len(filtered_periods),
+            len(periods),
+            energy_needed_kwh,
+        )
         
         if not filtered_periods:
             _LOGGER.info("No charge periods found in next window %s - %s", charge_window_start, charge_window_end)
@@ -1116,7 +1137,7 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                     ci_data = self._parse_ci_forecast(state_str, ci_state.attributes)
             
             if ci_data:
-                periods = ci_data.get("data", [])
+                periods = ci_data.get("periods", [])
                 if periods:
                     charge_power_kw = config_data.get(CONF_CHARGE_POWER_KW, DEFAULT_CHARGE_POWER_KW)
                     charge_window_start = config_data.get(CONF_CHARGE_WINDOW_START, DEFAULT_CHARGE_WINDOW_START)
