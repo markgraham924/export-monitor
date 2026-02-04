@@ -591,18 +591,20 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                     # Window is tomorrow
                     next_window_start = datetime.combine(now.date() + timedelta(days=1), window_start_time, tzinfo=timezone.utc)
             else:
-                # Overnight window
-                if current_time < window_start_time and current_time > window_end_time:
-                    # We're between end and start, so next window starts today
+                # Overnight window (e.g., 00:00-07:00)
+                if current_time > window_end_time and current_time < window_start_time:
+                    # We're between end and start (e.g., 08:00-23:59), so next window starts tonight
                     next_window_start = datetime.combine(now.date(), window_start_time, tzinfo=timezone.utc)
                 else:
-                    # Window either started yesterday and we're past the end,
-                    # or we need to wait for tonight's window
-                    if current_time <= window_end_time:
-                        # We're past midnight but before window end - next is tomorrow
-                        next_window_start = datetime.combine(now.date() + timedelta(days=1), window_start_time, tzinfo=timezone.utc)
+                    # We're either before end or after start
+                    # If we're before end (00:00-07:00), next is tomorrow
+                    # If we're after start (00:00-23:59), we need tonight's window
+                    if current_time < window_start_time:
+                        # We're in the early morning (00:00-00:59) before end, next is tonight
+                        next_window_start = datetime.combine(now.date(), window_start_time, tzinfo=timezone.utc)
                     else:
-                        # We're after window end - next is tonight
+                        # We're after start but technically before it wraps (shouldn't happen)
+                        # So assume next is tonight
                         next_window_start = datetime.combine(now.date(), window_start_time, tzinfo=timezone.utc)
         
         # Calculate next window end
