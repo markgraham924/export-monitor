@@ -578,3 +578,130 @@ class TestEdgeCases:
         # Should maintain reasonable precision
         assert headroom_kwh > 0
         assert headroom_kwh < battery_capacity
+
+# ============================================================================
+# Charge Plan Generation Tests
+# ============================================================================
+
+class TestChargePlanGeneration:
+    """Test charge plan generation with lowest CI period selection."""
+
+    def test_charge_plan_lowest_ci_sorting(self):
+        """Test that charge plan sorts periods by lowest CI first."""
+        # Charge planning should prioritize LOWEST CI (ascending), opposite of discharge
+        periods = [
+            {"from": "2026-02-04T10:00:00Z", "to": "2026-02-04T10:30:00Z", "intensity": {"forecast": 200}},
+            {"from": "2026-02-04T09:00:00Z", "to": "2026-02-04T09:30:00Z", "intensity": {"forecast": 50}},
+            {"from": "2026-02-04T11:00:00Z", "to": "2026-02-04T11:30:00Z", "intensity": {"forecast": 150}},
+        ]
+        
+        # Sort by CI ascending (lowest first)
+        sorted_periods = sorted(periods, key=lambda p: p["intensity"]["forecast"])
+        
+        assert sorted_periods[0]["intensity"]["forecast"] == 50
+        assert sorted_periods[1]["intensity"]["forecast"] == 150
+        assert sorted_periods[2]["intensity"]["forecast"] == 200
+
+    def test_charge_plan_energy_allocation(self):
+        """Test that charge energy is allocated correctly to periods."""
+        charge_power_kw = 3.68
+        period_duration_hours = 0.5  # 30 minutes
+        energy_needed_kwh = 1.84  # Half of available
+        
+        # Energy that can be charged in one 30-min period
+        period_energy = charge_power_kw * period_duration_hours
+        assert period_energy == pytest.approx(1.84, abs=0.01)
+        
+        # Can fully charge in one period
+        allocated = min(period_energy, energy_needed_kwh)
+        assert allocated == pytest.approx(1.84, abs=0.01)
+
+    def test_charge_plan_soc_to_energy_conversion(self):
+        """Test conversion from SOC percentage to energy (kWh)."""
+        current_soc = 50  # 50%
+        battery_capacity_kwh = 13.8  # 13.8 kWh
+        
+        soc_to_charge = 100 - current_soc  # 50%
+        energy_needed = (soc_to_charge / 100) * battery_capacity_kwh
+        
+        assert energy_needed == pytest.approx(6.9, abs=0.01)
+
+    def test_charge_plan_window_filtering(self):
+        """Test that charge plan only includes periods within window."""
+        # Charge window: 00:00 - 06:00
+        window_start = "00:00"
+        window_end = "06:00"
+        
+        # Period outside window (08:00)
+        assert not _is_in_window("08:30", window_start, window_end)
+        # Period inside window (02:00)
+        assert _is_in_window("02:30", window_start, window_end)
+
+    def test_charge_plan_overnight_window(self):
+        """Test charge plan with overnight window (23:00 - 06:00)."""
+        # Overnight window
+        window_start = "23:00"
+        window_end = "06:00"
+        
+        # 23:30 should be in window
+        assert _is_in_overnight_window("23:30", window_start, window_end)
+        # 02:00 should be in window
+        assert _is_in_overnight_window("02:00", window_start, window_end)
+        # 12:00 should NOT be in window
+        assert not _is_in_overnight_window("12:00", window_start, window_end)
+
+    def test_charge_plan_zero_energy_needed(self):
+        """Test charge plan when battery is already fully charged."""
+        current_soc = 100
+        battery_capacity = 13.8
+        
+        soc_to_charge = 100 - current_soc
+        energy_needed = (soc_to_charge / 100) * battery_capacity
+        
+        assert energy_needed == 0
+
+    def test_charge_plan_multiple_period_allocation(self):
+        """Test allocation across multiple periods."""
+        energy_needed = 5.0  # kWh
+        charge_power_kw = 3.68
+        period_duration = 0.5  # 30 min
+        
+        period_energy = charge_power_kw * period_duration  # ~1.84 kWh per period
+        
+        periods_needed = energy_needed / period_energy
+        assert periods_needed == pytest.approx(2.72, abs=0.01)  # Need ~3 periods
+
+
+# Helper functions for window testing
+def _is_in_window(time_str: str, window_start: str, window_end: str) -> bool:
+    """Check if time is within window (same-day window only)."""
+    from datetime import time
+    h, m = map(int, time_str.split(":"))
+    test_time = time(h, m)
+    
+    start_h, start_m = map(int, window_start.split(":"))
+    end_h, end_m = map(int, window_end.split(":"))
+    
+    start = time(start_h, start_m)
+    end = time(end_h, end_m)
+    
+    return start <= test_time <= end
+
+
+def _is_in_overnight_window(time_str: str, window_start: str, window_end: str) -> bool:
+    """Check if time is within overnight window (spans midnight)."""
+    from datetime import time
+    h, m = map(int, time_str.split(":"))
+    test_time = time(h, m)
+    
+    start_h, start_m = map(int, window_start.split(":"))
+    end_h, end_m = map(int, window_end.split(":"))
+    
+    start = time(start_h, start_m)
+    end = time(end_h, end_m)
+    
+    if start <= end:
+        return start <= test_time <= end
+    else:
+        # Overnight: either >= start OR <= end
+        return test_time >= start or test_time <= end

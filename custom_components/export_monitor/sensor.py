@@ -25,6 +25,8 @@ from .const import (
     ATTR_DISCHARGE_PLAN,
     ATTR_DISCHARGE_PLAN_TODAY,
     ATTR_DISCHARGE_PLAN_TOMORROW,
+    ATTR_CHARGE_PLAN_TODAY,
+    ATTR_CHARGE_PLAN_TOMORROW,
     ATTR_EXPORT_ALLOWED,
     ATTR_EXPORT_HEADROOM,
     ATTR_EXPORTED_TODAY,
@@ -79,6 +81,8 @@ async def async_setup_entry(
         PlanWindowSensor(coordinator, entry, ATTR_DISCHARGE_PLAN, "Plan Windows Total"),
         PlanWindowSensor(coordinator, entry, ATTR_DISCHARGE_PLAN_TODAY, "Plan Windows Today"),
         PlanWindowSensor(coordinator, entry, ATTR_DISCHARGE_PLAN_TOMORROW, "Plan Windows Tomorrow"),
+        ChargePlanSensor(coordinator, entry, ATTR_CHARGE_PLAN_TODAY, "Charge Plan Today"),
+        ChargePlanSensor(coordinator, entry, ATTR_CHARGE_PLAN_TOMORROW, "Charge Plan Tomorrow"),
     ]
 
     async_add_entities(sensors + diagnostics + plan_details)
@@ -589,4 +593,40 @@ class PlanWindowSensor(ExportMonitorSensor):
         if not self.coordinator.data: return None
         plan = self.coordinator.data.get(self._plan_key, [])
         return len(plan)
+
+
+class ChargePlanSensor(ExportMonitorSensor):
+    """Sensor for charge plan display."""
+
+    def __init__(self, coordinator: ExportMonitorCoordinator, entry: ConfigEntry, plan_key: str, name: str) -> None:
+        super().__init__(coordinator, entry, plan_key, name, "mdi:battery-charging")
+        self._plan_key = plan_key
+
+    @property
+    def native_value(self) -> str | None:
+        """Return formatted charge plan windows."""
+        if not self.coordinator.data:
+            return None
+        
+        plan = self.coordinator.data.get(self._plan_key, [])
+        if not plan:
+            return "No charge plan"
+        
+        # Format each window as "HH:MM - HH:MM 0.60kWh"
+        windows = []
+        for period in plan:
+            try:
+                start = period.get("period_start", "")
+                end = period.get("period_end", "")
+                energy = period.get("energy_kwh", 0)
+                
+                if start and end:
+                    # Extract time portion from ISO format
+                    start_time = start.split("T")[1][:5] if "T" in start else start
+                    end_time = end.split("T")[1][:5] if "T" in end else end
+                    windows.append(f"{start_time} - {end_time} {energy:.2f}kWh")
+            except (KeyError, IndexError, AttributeError):
+                continue
+        
+        return "\n".join(windows) if windows else "No windows"
 
