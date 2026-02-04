@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-02-05
+
+### Added
+- **Auto-Discharge Feature**: New toggle control to automatically trigger discharge at planned export windows
+- **Export Window Constraints**: Time-based start/end selectors to limit discharge to specific hours (default: 00:00 - 23:59)
+- **Window Auto-Trigger**: Discharge automatically starts when current time reaches planned window time
+- **Window Deduplication**: Prevents duplicate discharge triggers for the same window within a 24-hour period
+- **High CI Prioritization**: Fixed plan generation to prioritize HIGH carbon intensity periods (when grid is dirtiest)
+  - Discharge now helps grid most during peak carbon times instead of off-peak times
+  - Descending CI sort ensures highest-carbon periods are planned first
+
+### Changed
+- **Plan Generation Logic**: Export window constraints now filter discharge periods to only include times within specified window
+- **CI Period Sorting**: Changed from ascending to descending order to prioritize highest carbon intensity periods
+
 ## [1.5.1] - 2026-02-04
 
 ### Fixed
