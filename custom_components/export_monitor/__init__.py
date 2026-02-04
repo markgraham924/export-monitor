@@ -39,6 +39,7 @@ from .const import (
     SERVICE_STOP_CHARGE,
 )
 from .coordinator import ExportMonitorCoordinator
+from .error_handler import get_safe_sensor_value, safe_service_call
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -137,6 +138,18 @@ async def async_setup_services(
 ) -> None:
     """Set up services for the integration."""
 
+    async def _send_critical_notification(title: str, message: str, notification_id: str) -> None:
+        """Send a persistent notification for critical errors."""
+        await hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "title": f"⚠️ Export Monitor: {title}",
+                "message": message,
+                "notification_id": f"export_monitor_{notification_id}",
+            },
+        )
+
     def _get_domain_and_service(entity_id: str, service_type: str) -> tuple[str, str]:
         """Get the correct domain and service for an entity."""
         domain = entity_id.split(".")[0]
@@ -154,16 +167,25 @@ async def async_setup_services(
         current_soc_entity = config_data[CONF_CURRENT_SOC]
         min_soc = config_data.get(CONF_MIN_SOC, DEFAULT_MIN_SOC)
 
-        # Get current SOC
-        soc_state = hass.states.get(current_soc_entity)
-        if soc_state is None:
-            _LOGGER.error("Cannot read current SOC from %s", current_soc_entity)
-            return
-
-        try:
-            current_soc = float(soc_state.state)
-        except (ValueError, TypeError):
-            _LOGGER.error("Invalid SOC value: %s", soc_state.state)
+        # Get current SOC with validation
+        current_soc = get_safe_sensor_value(
+            hass, current_soc_entity, "soc", default=None
+        )
+        if current_soc is None:
+            _LOGGER.error(
+                "Cannot start discharge: unable to read valid SOC from %s",
+                current_soc_entity,
+            )
+            # Set error state in coordinator
+            coordinator.set_error_state("soc_read_failed")
+            # Send critical notification
+            await _send_critical_notification(
+                "SOC Sensor Failed",
+                f"Unable to read valid battery SOC from {current_soc_entity}. "
+                "Discharge cannot start until this is resolved. "
+                "Check your battery sensor configuration.",
+                "soc_read_failed",
+            )
             return
 
         # Safety check - don't discharge if SOC too low
@@ -175,9 +197,27 @@ async def async_setup_services(
             )
             return
 
+        # Check for stale coordinator data
+        if coordinator.is_data_stale():
+            _LOGGER.error(
+                "Cannot start discharge: coordinator data is stale (age: %.1f seconds)",
+                coordinator.get_data_age() or 0,
+            )
+            coordinator.set_error_state("stale_data")
+            await _send_critical_notification(
+                "Stale Data Detected",
+                f"Coordinator data is stale (age: {coordinator.get_data_age():.1f}s). "
+                "This indicates a problem with sensor updates. "
+                "Discharge cannot start with outdated data to prevent export limit breaches. "
+                "Check system health sensor for details.",
+                "stale_data",
+            )
+            return
+
         # Get export headroom from coordinator
         if not coordinator.data:
             _LOGGER.error("Cannot start discharge: no coordinator data available")
+            coordinator.set_error_state("no_data")
             return
             
         headroom = coordinator.data.get(ATTR_EXPORT_HEADROOM, 0)
@@ -207,32 +247,53 @@ async def async_setup_services(
             discharge_power_kw,
         )
 
-        # Set discharge power to match target export power (in kW)
+        # Set discharge power to match target export power (in kW) with safe call
         discharge_power_entity = config_data[CONF_DISCHARGE_POWER]
         domain, service = _get_domain_and_service(discharge_power_entity, "set_value")
-        await hass.services.async_call(
+        
+        success = await safe_service_call(
+            hass,
             domain,
             service,
             {
                 "entity_id": discharge_power_entity,
                 "value": discharge_power_kw,
             },
-            blocking=True,
+            entity_id=discharge_power_entity,
+            expected_value=discharge_power_kw,
         )
+        
+        if not success:
+            _LOGGER.error("Failed to set discharge power, aborting start discharge")
+            coordinator.set_error_state("discharge_power_set_failed")
+            await _send_critical_notification(
+                "Discharge Power Set Failed",
+                f"Failed to set discharge power to {discharge_power_kw:.2f}kW on entity {discharge_power_entity}. "
+                "This indicates a problem with the battery control system. "
+                "Discharge has been aborted to prevent unpredictable behavior.",
+                "discharge_power_failed",
+            )
+            return
 
         # Set cutoff SOC using the specific Alpha ESS helper entity
         cutoff_soc_entity = "input_number.alphaess_helper_force_discharging_cutoff_soc"
         if hass.states.get(cutoff_soc_entity):
             domain, service = _get_domain_and_service(cutoff_soc_entity, "set_value")
-            await hass.services.async_call(
+            success = await safe_service_call(
+                hass,
                 domain,
                 service,
                 {
                     "entity_id": cutoff_soc_entity,
                     "value": min_soc,
                 },
-                blocking=True,
+                entity_id=cutoff_soc_entity,
+                expected_value=min_soc,
             )
+            if not success:
+                _LOGGER.warning(
+                    "Failed to set cutoff SOC, continuing anyway"
+                )
         else:
             _LOGGER.warning("Cutoff SOC entity %s not found, skipping", cutoff_soc_entity)
 
@@ -249,36 +310,94 @@ async def async_setup_services(
 
         if duration_entity:
             domain, service = _get_domain_and_service(duration_entity, "set_value")
-            await hass.services.async_call(
+            success = await safe_service_call(
+                hass,
                 domain,
                 service,
                 {
                     "entity_id": duration_entity,
                     "value": duration_minutes,
                 },
-                blocking=True,
+                entity_id=duration_entity,
+                expected_value=duration_minutes,
             )
-            _LOGGER.info("Set discharge duration to %.1f minutes", duration_minutes)
+            if success:
+                _LOGGER.info("Set discharge duration to %.1f minutes", duration_minutes)
+            else:
+                _LOGGER.warning("Failed to set discharge duration, continuing anyway")
 
         # Enable discharge button
         discharge_button_entity = config_data[CONF_DISCHARGE_BUTTON]
         domain, service = _get_domain_and_service(discharge_button_entity, "turn_on")
-        await hass.services.async_call(
+        success = await safe_service_call(
+            hass,
             domain,
             service,
             {"entity_id": discharge_button_entity},
-            blocking=True,
+            entity_id=discharge_button_entity,
+            expected_value="on",
         )
+        
+        if not success:
+            _LOGGER.error("Failed to enable discharge button, discharge may not start")
+            coordinator.set_error_state("discharge_start_failed")
+            await _send_critical_notification(
+                "Discharge Start Failed",
+                f"Failed to enable discharge on entity {discharge_button_entity}. "
+                "Battery discharge has not started. "
+                "Check battery control system and entity configuration.",
+                "discharge_start_failed",
+            )
+            return
 
-        # Get current grid export for tracking
+        # Get current grid export for tracking with validation
         grid_feed_entity = config_data[CONF_GRID_FEED_TODAY]
-        grid_feed_state = hass.states.get(grid_feed_entity)
-        current_grid_export = float(grid_feed_state.state) if grid_feed_state else 0.0
+        current_grid_export = get_safe_sensor_value(
+            hass, grid_feed_entity, "energy", default=0.0
+        )
         
         # Calculate target energy (headroom from coordinator data)
         target_energy = coordinator.data.get(ATTR_EXPORT_HEADROOM, 0.0) if coordinator.data else 0.0
         
         coordinator.set_discharge_active(True, current_grid_export, target_energy)
+        coordinator.clear_error_state()
+        
+        # Clear any previous error notifications (best-effort cleanup)
+        try:
+            await hass.services.async_call(
+                "persistent_notification",
+                "dismiss",
+                {
+                    "notification_id": "export_monitor_soc_read_failed",
+                },
+            )
+            await hass.services.async_call(
+                "persistent_notification",
+                "dismiss",
+                {
+                    "notification_id": "export_monitor_stale_data",
+                },
+            )
+            await hass.services.async_call(
+                "persistent_notification",
+                "dismiss",
+                {
+                    "notification_id": "export_monitor_discharge_power_failed",
+                },
+            )
+            await hass.services.async_call(
+                "persistent_notification",
+                "dismiss",
+                {
+                    "notification_id": "export_monitor_discharge_start_failed",
+                },
+            )
+        except Exception as err:
+            # Non-critical; log and continue
+            _LOGGER.warning(
+                "Failed to dismiss error notifications: %s",
+                err,
+            )
 
         _LOGGER.info(
             "Started discharge: %.3f kW for %.1f min (cutoff SOC: %.0f%%, target: %.3f kWh)",
@@ -293,16 +412,47 @@ async def async_setup_services(
         config_data = {**coordinator.entry.data, **coordinator.entry.options}
         discharge_button_entity = config_data[CONF_DISCHARGE_BUTTON]
 
-        # Disable discharge button
+        # Disable discharge button with safe call
         domain, service = _get_domain_and_service(discharge_button_entity, "turn_off")
-        await hass.services.async_call(
+        success = await safe_service_call(
+            hass,
             domain,
             service,
             {"entity_id": discharge_button_entity},
-            blocking=True,
+            entity_id=discharge_button_entity,
+            expected_value="off",
         )
+        
+        if not success:
+            _LOGGER.error("Failed to disable discharge button, discharge may still be active")
+            coordinator.set_error_state("discharge_stop_failed")
+            await _send_critical_notification(
+                "Discharge Stop Failed",
+                f"Failed to disable discharge on entity {discharge_button_entity}. "
+                "Battery may still be discharging! "
+                "Check battery immediately and stop discharge manually if needed.",
+                "discharge_stop_failed",
+            )
+            return
 
         coordinator.set_discharge_active(False)
+        coordinator.clear_error_state()
+        
+        # Clear stop failure notification if it exists (best-effort cleanup)
+        try:
+            await hass.services.async_call(
+                "persistent_notification",
+                "dismiss",
+                {
+                    "notification_id": "export_monitor_discharge_stop_failed",
+                },
+            )
+        except Exception as err:
+            # Non-critical; log and continue
+            _LOGGER.warning(
+                "Failed to dismiss discharge stop failure notification: %s",
+                err,
+            )
 
         _LOGGER.info("Stopped discharge")
 

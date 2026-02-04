@@ -69,6 +69,11 @@ async def async_setup_entry(
         GenericDiagnosticSensor(coordinator, entry, "min_soc", "Minimum SOC", "mdi:battery-arrow-down", PERCENTAGE, SensorDeviceClass.BATTERY),
         GenericDiagnosticSensor(coordinator, entry, "observe_reserve_soc", "Observe Reserve SOC", "mdi:shield-search"),
         GenericDiagnosticSensor(coordinator, entry, "reserve_limit_reached", "Reserve Limit Reached", "mdi:shield-alert"),
+        # System health monitoring sensors
+        SystemHealthSensor(coordinator, entry),
+        ErrorStateSensor(coordinator, entry),
+        DataStalenessSensor(coordinator, entry),
+        CircuitBreakerStatusSensor(coordinator, entry),
     ]
 
     # Plan Detail Sensors
@@ -702,4 +707,140 @@ class NextChargeSessionSensor(ExportMonitorSensor):
             "plan_details": plan,
         }
 
+
+class SystemHealthSensor(ExportMonitorSensor):
+    """Sensor for overall system health status."""
+
+    def __init__(
+        self,
+        coordinator: ExportMonitorCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        """Initialize sensor."""
+        super().__init__(
+            coordinator,
+            entry,
+            "system_health",
+            "System Health",
+            "mdi:heart-pulse",
+        )
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    @property
+    def native_value(self) -> str:
+        """Return system health status."""
+        if self.coordinator.get_error_state():
+            return "Error"
+        if self.coordinator.is_data_stale():
+            return "Stale Data"
+        if self.coordinator.is_circuit_breaker_open():
+            return "Circuit Breaker Open"
+        return "Healthy"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional attributes."""
+        health = self.coordinator.get_system_health()
+        return {
+            "error_state": health.get("error_state"),
+            "data_age_seconds": health.get("data_staleness", {}).get("age_seconds"),
+            "circuit_breaker_failures": health.get("circuit_breaker", {}).get("failure_count"),
+            "discharge_active": health.get("discharge_active"),
+        }
+
+
+class ErrorStateSensor(ExportMonitorSensor):
+    """Sensor for current error state."""
+
+    def __init__(
+        self,
+        coordinator: ExportMonitorCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        """Initialize sensor."""
+        super().__init__(
+            coordinator,
+            entry,
+            "error_state",
+            "Error State",
+            "mdi:alert-circle",
+        )
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    @property
+    def native_value(self) -> str:
+        """Return error state."""
+        error = self.coordinator.get_error_state()
+        return error if error else "none"
+
+
+class DataStalenessSensor(ExportMonitorSensor):
+    """Sensor for data staleness monitoring."""
+
+    def __init__(
+        self,
+        coordinator: ExportMonitorCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        """Initialize sensor."""
+        super().__init__(
+            coordinator,
+            entry,
+            "data_staleness",
+            "Data Staleness",
+            "mdi:clock-alert",
+        )
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+        self._attr_native_unit_of_measurement = "s"
+
+    @property
+    def native_value(self) -> float | None:
+        """Return data age in seconds."""
+        age = self.coordinator.get_data_age()
+        return round(age, 1) if age is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional attributes."""
+        return {
+            "is_stale": self.coordinator.is_data_stale(),
+            "threshold_seconds": 30,
+        }
+
+
+class CircuitBreakerStatusSensor(ExportMonitorSensor):
+    """Sensor for circuit breaker status."""
+
+    def __init__(
+        self,
+        coordinator: ExportMonitorCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        """Initialize sensor."""
+        super().__init__(
+            coordinator,
+            entry,
+            "circuit_breaker_status",
+            "Circuit Breaker Status",
+            "mdi:electric-switch",
+        )
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    @property
+    def native_value(self) -> str:
+        """Return circuit breaker status."""
+        health = self.coordinator.get_system_health()
+        cb_status = health.get("circuit_breaker", {})
+        return "Open" if cb_status.get("is_open") else "Closed"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional attributes."""
+        health = self.coordinator.get_system_health()
+        cb_status = health.get("circuit_breaker", {})
+        return {
+            "failure_count": cb_status.get("failure_count"),
+            "last_failure_time": cb_status.get("last_failure_time"),
+            "can_attempt": self.coordinator.can_attempt_operation(),
+        }
 
