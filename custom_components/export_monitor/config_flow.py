@@ -17,6 +17,9 @@ from .const import (
     CONF_DISCHARGE_POWER,
     CONF_CI_FORECAST_SENSOR,
     CONF_ENABLE_CI_PLANNING,
+    CONF_ENABLE_AUTO_DISCHARGE,
+    CONF_EXPORT_WINDOW_START,
+    CONF_EXPORT_WINDOW_END,
     CONF_GRID_FEED_TODAY,
     CONF_MIN_SOC,
     CONF_OBSERVE_RESERVE_SOC,
@@ -28,6 +31,9 @@ from .const import (
     CONF_SOLCAST_TOTAL_TODAY,
     CONF_TARGET_EXPORT,
     DEFAULT_ENABLE_CI_PLANNING,
+    DEFAULT_ENABLE_AUTO_DISCHARGE,
+    DEFAULT_EXPORT_WINDOW_START,
+    DEFAULT_EXPORT_WINDOW_END,
     DEFAULT_MIN_SOC,
     DEFAULT_OBSERVE_RESERVE_SOC,
     DEFAULT_SAFETY_MARGIN,
@@ -194,6 +200,15 @@ class ExportMonitorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(
                     CONF_ENABLE_CI_PLANNING, default=DEFAULT_ENABLE_CI_PLANNING
                 ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_ENABLE_AUTO_DISCHARGE, default=DEFAULT_ENABLE_AUTO_DISCHARGE
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_EXPORT_WINDOW_START, default=DEFAULT_EXPORT_WINDOW_START
+                ): selector.TimeSelector(),
+                vol.Optional(
+                    CONF_EXPORT_WINDOW_END, default=DEFAULT_EXPORT_WINDOW_END
+                ): selector.TimeSelector(),
             }
         )
 
@@ -390,6 +405,18 @@ class ExportMonitorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_ENABLE_CI_PLANNING,
                     default=current_data.get(CONF_ENABLE_CI_PLANNING, DEFAULT_ENABLE_CI_PLANNING),
                 ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_ENABLE_AUTO_DISCHARGE,
+                    default=current_data.get(CONF_ENABLE_AUTO_DISCHARGE, DEFAULT_ENABLE_AUTO_DISCHARGE),
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_EXPORT_WINDOW_START,
+                    default=current_data.get(CONF_EXPORT_WINDOW_START, DEFAULT_EXPORT_WINDOW_START),
+                ): selector.TimeSelector(),
+                vol.Optional(
+                    CONF_EXPORT_WINDOW_END,
+                    default=current_data.get(CONF_EXPORT_WINDOW_END, DEFAULT_EXPORT_WINDOW_END),
+                ): selector.TimeSelector(),
             }
         )
 
@@ -465,6 +492,22 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     CONF_OBSERVE_RESERVE_SOC,
                     default=current_data.get(CONF_OBSERVE_RESERVE_SOC, DEFAULT_OBSERVE_RESERVE_SOC),
                 ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_ENABLE_CI_PLANNING,
+                    default=current_data.get(CONF_ENABLE_CI_PLANNING, DEFAULT_ENABLE_CI_PLANNING),
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_ENABLE_AUTO_DISCHARGE,
+                    default=current_data.get(CONF_ENABLE_AUTO_DISCHARGE, DEFAULT_ENABLE_AUTO_DISCHARGE),
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_EXPORT_WINDOW_START,
+                    default=current_data.get(CONF_EXPORT_WINDOW_START, DEFAULT_EXPORT_WINDOW_START),
+                ): selector.TimeSelector(),
+                vol.Optional(
+                    CONF_EXPORT_WINDOW_END,
+                    default=current_data.get(CONF_EXPORT_WINDOW_END, DEFAULT_EXPORT_WINDOW_END),
+                ): selector.TimeSelector(),
             }
         )
 

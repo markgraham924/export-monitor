@@ -27,6 +27,8 @@ from .const import (
     CONF_CI_FORECAST_SENSOR,
     CONF_CURRENT_SOC,
     CONF_ENABLE_CI_PLANNING,
+    CONF_EXPORT_WINDOW_START,
+    CONF_EXPORT_WINDOW_END,
     CONF_GRID_FEED_TODAY,
     CONF_MIN_SOC,
     CONF_OBSERVE_RESERVE_SOC,
@@ -38,6 +40,8 @@ from .const import (
     CONF_SOLCAST_TOTAL_TODAY,
     CONF_TARGET_EXPORT,
     DEFAULT_ENABLE_CI_PLANNING,
+    DEFAULT_EXPORT_WINDOW_START,
+    DEFAULT_EXPORT_WINDOW_END,
     DEFAULT_MIN_SOC,
     DEFAULT_OBSERVE_RESERVE_SOC,
     DEFAULT_SAFETY_MARGIN,
@@ -196,6 +200,8 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
         discharge_power_kw: float,
         solar_generated: float,
         solar_predicted: float,
+        export_window_start: str = "00:00",
+        export_window_end: str = "23:59",
     ) -> list[dict]:
         """Generate discharge plan for today (remaining slots until midnight).
         
@@ -205,6 +211,8 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
             discharge_power_kw: Discharge power in kW
             solar_generated: Solar generated today so far (kWh)
             solar_predicted: Predicted solar for today (kWh)
+            export_window_start: Start time for export window (HH:MM)
+            export_window_end: End time for export window (HH:MM)
             
         Returns:
             List of discharge windows for today
@@ -215,6 +223,17 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
         now = datetime.now(timezone.utc)
         today_midnight = now.replace(hour=23, minute=59, second=59)
         today_energy_budget = max(solar_generated, solar_predicted)
+        
+        # Parse export window times
+        try:
+            window_start_parts = export_window_start.split(":") if isinstance(export_window_start, str) else export_window_start
+            window_start_time = datetime.strptime(f"{window_start_parts[0]}:{window_start_parts[1]}", "%H:%M").time()
+            window_end_parts = export_window_end.split(":") if isinstance(export_window_end, str) else export_window_end
+            window_end_time = datetime.strptime(f"{window_end_parts[0]}:{window_end_parts[1]}", "%H:%M").time()
+        except (ValueError, IndexError, AttributeError):
+            _LOGGER.warning("Invalid export window times, using full day")
+            window_start_time = datetime.strptime("00:00", "%H:%M").time()
+            window_end_time = datetime.strptime("23:59", "%H:%M").time()
         
         # Find periods remaining today
         future_periods = []
@@ -231,19 +250,24 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                     # Adjust from_time if it's before now
                     effective_from = max(from_time, now)
                     
-                    future_periods.append({
-                        "from": effective_from,
-                        "to": to_time,
-                        "duration_minutes": (to_time - effective_from).total_seconds() / 60,
-                        "ci_value": intensity_forecast,
-                        "ci_index": intensity_index,
-                    })
+                    # Check if period overlaps with export window
+                    from_time_local = effective_from.astimezone().time()
+                    to_time_local = to_time.astimezone().time()
+                    
+                    if from_time_local <= window_end_time and to_time_local >= window_start_time:
+                        future_periods.append({
+                            "from": effective_from,
+                            "to": to_time,
+                            "duration_minutes": (to_time - effective_from).total_seconds() / 60,
+                            "ci_value": intensity_forecast,
+                            "ci_index": intensity_index,
+                        })
             except (ValueError, KeyError) as err:
                 _LOGGER.debug("Error parsing CI period: %s", err)
                 continue
 
-        # Sort by CI value (lowest first - we want to export during low CI periods)
-        future_periods.sort(key=lambda x: x["ci_value"])
+        # Sort by CI value (highest first - we want to export during high CI periods)
+        future_periods.sort(key=lambda x: x["ci_value"], reverse=True)
 
         # Build plan greedily within headroom
         plan = []
@@ -278,6 +302,8 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
         periods: list[dict],
         solar_predicted_tomorrow: float,
         discharge_power_kw: float,
+        export_window_start: str = "00:00",
+        export_window_end: str = "23:59",
     ) -> list[dict]:
         """Generate discharge plan for tomorrow (full 24hrs using predicted solar).
         
@@ -285,6 +311,8 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
             periods: CI forecast periods from CI sensor
             solar_predicted_tomorrow: Predicted solar for tomorrow from Solcast (kWh)
             discharge_power_kw: Discharge power in kW
+            export_window_start: Start time for export window (HH:MM)
+            export_window_end: End time for export window (HH:MM)
             
         Returns:
             List of discharge windows for tomorrow
@@ -296,6 +324,17 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
         tomorrow = now.date() + timedelta(days=1)
         tomorrow_start = datetime.combine(tomorrow, datetime.min.time()).replace(tzinfo=timezone.utc)
         tomorrow_midnight = tomorrow_start.replace(hour=23, minute=59, second=59)
+
+        # Parse export window times
+        try:
+            window_start_parts = export_window_start.split(":") if isinstance(export_window_start, str) else export_window_start
+            window_start_time = datetime.strptime(f"{window_start_parts[0]}:{window_start_parts[1]}", "%H:%M").time()
+            window_end_parts = export_window_end.split(":") if isinstance(export_window_end, str) else export_window_end
+            window_end_time = datetime.strptime(f"{window_end_parts[0]}:{window_end_parts[1]}", "%H:%M").time()
+        except (ValueError, IndexError, AttributeError):
+            _LOGGER.warning("Invalid export window times, using full day")
+            window_start_time = datetime.strptime("00:00", "%H:%M").time()
+            window_end_time = datetime.strptime("23:59", "%H:%M").time()
 
         # Find periods for tomorrow
         future_periods = []
@@ -309,19 +348,24 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                     intensity_forecast = period.get("intensity", {}).get("forecast", 0)
                     intensity_index = period.get("intensity", {}).get("index", "unknown")
                     
-                    future_periods.append({
-                        "from": from_time,
-                        "to": to_time,
-                        "duration_minutes": (to_time - from_time).total_seconds() / 60,
-                        "ci_value": intensity_forecast,
-                        "ci_index": intensity_index,
-                    })
+                    # Check if period overlaps with export window
+                    from_time_local = from_time.astimezone().time()
+                    to_time_local = to_time.astimezone().time()
+                    
+                    if from_time_local <= window_end_time and to_time_local >= window_start_time:
+                        future_periods.append({
+                            "from": from_time,
+                            "to": to_time,
+                            "duration_minutes": (to_time - from_time).total_seconds() / 60,
+                            "ci_value": intensity_forecast,
+                            "ci_index": intensity_index,
+                        })
             except (ValueError, KeyError) as err:
                 _LOGGER.debug("Error parsing CI period: %s", err)
                 continue
 
-        # Sort by CI value (lowest first - export during low CI periods)
-        future_periods.sort(key=lambda x: x["ci_value"])
+        # Sort by CI value (highest first - export during high CI periods)
+        future_periods.sort(key=lambda x: x["ci_value"], reverse=True)
 
         # Build plan greedily using tomorrow's predicted solar as headroom
         plan = []
@@ -352,14 +396,26 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
         return plan
 
     def _find_highest_ci_periods(
-        self, periods: list[dict], headroom_kwh: float, discharge_power_kw: float
+        self, periods: list[dict], headroom_kwh: float, discharge_power_kw: float,
+        export_window_start: str = "00:00", export_window_end: str = "23:59"
     ) -> list[dict]:
-        """Find and rank highest CI periods, build discharge plan within headroom."""
+        """Find and rank highest CI periods, build discharge plan within headroom and export window."""
         if not periods or headroom_kwh <= 0 or discharge_power_kw <= 0:
             return []
 
         now = datetime.now(timezone.utc)
         future_periods = []
+
+        # Parse export window times
+        try:
+            window_start_parts = export_window_start.split(":") if isinstance(export_window_start, str) else export_window_start
+            window_start_time = datetime.strptime(f"{window_start_parts[0]}:{window_start_parts[1]}", "%H:%M").time()
+            window_end_parts = export_window_end.split(":") if isinstance(export_window_end, str) else export_window_end
+            window_end_time = datetime.strptime(f"{window_end_parts[0]}:{window_end_parts[1]}", "%H:%M").time()
+        except (ValueError, IndexError, AttributeError):
+            _LOGGER.warning("Invalid export window times, using full day")
+            window_start_time = datetime.strptime("00:00", "%H:%M").time()
+            window_end_time = datetime.strptime("23:59", "%H:%M").time()
 
         for period in periods:
             try:
@@ -368,22 +424,27 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                 intensity_forecast = period.get("intensity", {}).get("forecast", 0)
                 intensity_index = period.get("intensity", {}).get("index", "unknown")
 
-                # Only consider future periods
+                # Only consider future periods within export window
                 if to_time > now:
-                    future_periods.append(
-                        {
-                            "from": from_time,
-                            "to": to_time,
-                            "duration_minutes": (to_time - from_time).total_seconds() / 60,
-                            "ci_value": intensity_forecast,
-                            "ci_index": intensity_index,
-                        }
-                    )
+                    from_time_local = from_time.astimezone().time()
+                    to_time_local = to_time.astimezone().time()
+                    
+                    # Check if period overlaps with export window
+                    if from_time_local <= window_end_time and to_time_local >= window_start_time:
+                        future_periods.append(
+                            {
+                                "from": from_time,
+                                "to": to_time,
+                                "duration_minutes": (to_time - from_time).total_seconds() / 60,
+                                "ci_value": intensity_forecast,
+                                "ci_index": intensity_index,
+                            }
+                        )
             except (ValueError, KeyError) as err:
                 _LOGGER.debug("Error parsing CI period: %s", err)
                 continue
 
-        # Sort by CI value (highest first)
+        # Sort by CI value (highest first) - prioritize high CI periods
         future_periods.sort(key=lambda x: x["ci_value"], reverse=True)
 
         # Build plan greedily within headroom
@@ -576,6 +637,10 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                     
                     discharge_power_kw = target_export / 1000
                     
+                    # Get export window from config
+                    export_window_start = config_data.get(CONF_EXPORT_WINDOW_START, DEFAULT_EXPORT_WINDOW_START)
+                    export_window_end = config_data.get(CONF_EXPORT_WINDOW_END, DEFAULT_EXPORT_WINDOW_END)
+                    
                     # Generate plan for today (remaining hours until midnight)
                     if headroom_kwh > 0:
                         discharge_plan_today = self._generate_today_plan(
@@ -584,6 +649,8 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                             discharge_power_kw,
                             pv_energy_today,
                             solcast_total_today,
+                            export_window_start,
+                            export_window_end,
                         )
                         _LOGGER.debug(
                             "Generated today's CI discharge plan: %d periods, %.3f kWh total",
@@ -603,6 +670,8 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                             periods,
                             solcast_tomorrow_value,
                             discharge_power_kw,
+                            export_window_start,
+                            export_window_end,
                         )
                         _LOGGER.debug(
                             "Generated tomorrow's CI discharge plan: %d periods, %.3f kWh total",
