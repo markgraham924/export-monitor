@@ -27,6 +27,7 @@ CONF_ENABLE_CHARGE_PLANNING: Final = "enable_charge_planning"  # Boolean
 CONF_CHARGE_WINDOW_START: Final = "charge_window_start"  # Time (HH:MM)
 CONF_CHARGE_WINDOW_END: Final = "charge_window_end"  # Time (HH:MM)
 CONF_CHARGE_POWER_KW: Final = "charge_power_kw"  # Charge power in kW
+CONF_BATTERY_CAPACITY_KWH: Final = "battery_capacity_kwh"  # Battery capacity in kWh
 
 # Service names
 SERVICE_START_DISCHARGE: Final = "start_discharge"
@@ -45,6 +46,7 @@ DEFAULT_ENABLE_CHARGE_PLANNING: Final = False  # Disabled by default
 DEFAULT_CHARGE_WINDOW_START: Final = "00:00"  # Full day by default
 DEFAULT_CHARGE_WINDOW_END: Final = "06:00"  # Overnight charging by default
 DEFAULT_CHARGE_POWER_KW: Final = 3.68  # Default charge power in kW
+DEFAULT_BATTERY_CAPACITY_KWH: Final = 10.0  # Default battery capacity in kWh
 DEFAULT_MIN_SOC: Final = 20  # Percent
 DEFAULT_SAFETY_MARGIN: Final = 0.5  # kWh (0.5 kWh margin)
 DEFAULT_SCAN_INTERVAL: Final = 10  # Seconds

@@ -29,6 +29,7 @@ from .const import (
     CONF_CHARGE_WINDOW_END,
     CONF_CHARGE_WINDOW_START,
     CONF_CHARGE_POWER_KW,
+    CONF_BATTERY_CAPACITY_KWH,
     CONF_CI_FORECAST_SENSOR,
     CONF_CURRENT_SOC,
     CONF_DISCHARGE_CUTOFF_SOC,
@@ -50,6 +51,7 @@ from .const import (
     DEFAULT_CHARGE_WINDOW_END,
     DEFAULT_CHARGE_WINDOW_START,
     DEFAULT_CHARGE_POWER_KW,
+    DEFAULT_BATTERY_CAPACITY_KWH,
     DEFAULT_ENABLE_CI_PLANNING,
     DEFAULT_EXPORT_WINDOW_START,
     DEFAULT_EXPORT_WINDOW_END,
@@ -516,37 +518,30 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
         charge_power_kw: float,
         charge_window_start: str,
         charge_window_end: str,
+        battery_capacity_kwh: float,
     ) -> list[dict]:
         """Generate charge plan for today based on LOWEST CI periods.
         
         Args:
             periods: CI forecast periods
             current_soc: Current battery state of charge (%)
-            discharge_cutoff_soc: Battery capacity reference (full charge SOC %)
+            discharge_cutoff_soc: Discharge cutoff SOC (%)
             charge_power_kw: Charge power in kW
             charge_window_start: Charge window start time (HH:MM)
             charge_window_end: Charge window end time (HH:MM)
+            battery_capacity_kwh: Battery total capacity in kWh
             
         Returns:
             List of charge plan windows with start/end times and energy
         """
-        if not periods or charge_power_kw <= 0:
+        if not periods or charge_power_kw <= 0 or battery_capacity_kwh <= 0:
             return []
         
         # Calculate energy needed to reach 100% SOC
-        # Assuming discharge_cutoff_soc sensor represents battery capacity at 100%
-        # We derive capacity from current SOC reading
         if current_soc >= 100:
             return []  # Already fully charged
         
-        # Energy needed = (100% - current%) * capacity
-        # Capacity = energy_at_current_soc / (current_soc / 100)
-        # But we don't have absolute energy, so we work with SOC difference
         soc_to_charge = 100 - current_soc  # Percentage to charge
-        
-        # Use discharge_cutoff_soc as battery capacity reference (in kWh equivalent)
-        # This is a simplification - ideally would have explicit battery_capacity config
-        battery_capacity_kwh = discharge_cutoff_soc / 10  # Rough estimate from SOC sensor
         energy_needed_kwh = (soc_to_charge / 100) * battery_capacity_kwh
         
         if energy_needed_kwh <= 0:
@@ -649,18 +644,18 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
         charge_power_kw: float,
         charge_window_start: str,
         charge_window_end: str,
+        battery_capacity_kwh: float,
     ) -> list[dict]:
         """Generate charge plan for tomorrow based on LOWEST CI periods.
         
-        Similar to today's plan but assumes starting from current SOC at midnight.
+        Similar to today's plan but for tomorrow.
         """
-        if not periods or charge_power_kw <= 0:
+        if not periods or charge_power_kw <= 0 or battery_capacity_kwh <= 0:
             return []
         
-        # For tomorrow, assume we want to reach 100% from some baseline
-        # Use a conservative estimate - charge to 80% of capacity
-        battery_capacity_kwh = discharge_cutoff_soc / 10
-        energy_needed_kwh = 0.8 * battery_capacity_kwh  # Assume 80% charge needed
+        # For tomorrow, assume we want to reach 100% SOC
+        # This gives maximum flexibility for the next day
+        energy_needed_kwh = battery_capacity_kwh
         
         # Parse charge window times
         try:
@@ -948,6 +943,7 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                     charge_power_kw = config_data.get(CONF_CHARGE_POWER_KW, DEFAULT_CHARGE_POWER_KW)
                     charge_window_start = config_data.get(CONF_CHARGE_WINDOW_START, DEFAULT_CHARGE_WINDOW_START)
                     charge_window_end = config_data.get(CONF_CHARGE_WINDOW_END, DEFAULT_CHARGE_WINDOW_END)
+                    battery_capacity_kwh = config_data.get(CONF_BATTERY_CAPACITY_KWH, DEFAULT_BATTERY_CAPACITY_KWH)
                     
                     # Generate charge plan for today
                     charge_plan_today = self._generate_charge_plan_today(
@@ -957,6 +953,7 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                         charge_power_kw,
                         charge_window_start,
                         charge_window_end,
+                        battery_capacity_kwh,
                     )
                     _LOGGER.debug(
                         "Generated today's CI charge plan: %d periods, %.3f kWh total",
@@ -971,6 +968,7 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                         charge_power_kw,
                         charge_window_start,
                         charge_window_end,
+                        battery_capacity_kwh,
                     )
                     _LOGGER.debug(
                         "Generated tomorrow's CI charge plan: %d periods, %.3f kWh total",

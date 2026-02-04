@@ -24,6 +24,7 @@ from .const import (
     CONF_CHARGE_WINDOW_START,
     CONF_CHARGE_WINDOW_END,
     CONF_CHARGE_POWER_KW,
+    CONF_BATTERY_CAPACITY_KWH,
     CONF_GRID_FEED_TODAY,
     CONF_MIN_SOC,
     CONF_OBSERVE_RESERVE_SOC,
@@ -42,6 +43,7 @@ from .const import (
     DEFAULT_CHARGE_WINDOW_START,
     DEFAULT_CHARGE_WINDOW_END,
     DEFAULT_CHARGE_POWER_KW,
+    DEFAULT_BATTERY_CAPACITY_KWH,
     DEFAULT_MIN_SOC,
     DEFAULT_OBSERVE_RESERVE_SOC,
     DEFAULT_SAFETY_MARGIN,
@@ -234,6 +236,17 @@ class ExportMonitorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         max=10.0,
                         step=0.01,
                         unit_of_measurement="kW",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_BATTERY_CAPACITY_KWH, default=DEFAULT_BATTERY_CAPACITY_KWH
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0.5,
+                        max=100.0,
+                        step=0.1,
+                        unit_of_measurement="kWh",
                         mode=selector.NumberSelectorMode.BOX,
                     )
                 ),
@@ -469,6 +482,18 @@ class ExportMonitorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         mode=selector.NumberSelectorMode.BOX,
                     )
                 ),
+                vol.Optional(
+                    CONF_BATTERY_CAPACITY_KWH,
+                    default=current_data.get(CONF_BATTERY_CAPACITY_KWH, DEFAULT_BATTERY_CAPACITY_KWH),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0.5,
+                        max=100.0,
+                        step=0.1,
+                        unit_of_measurement="kWh",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
             }
         )
 
@@ -581,6 +606,18 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                         max=10.0,
                         step=0.01,
                         unit_of_measurement="kW",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_BATTERY_CAPACITY_KWH,
+                    default=current_data.get(CONF_BATTERY_CAPACITY_KWH, DEFAULT_BATTERY_CAPACITY_KWH),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0.5,
+                        max=100.0,
+                        step=0.1,
+                        unit_of_measurement="kWh",
                         mode=selector.NumberSelectorMode.BOX,
                     )
                 ),
