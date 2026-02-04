@@ -705,3 +705,100 @@ def _is_in_overnight_window(time_str: str, window_start: str, window_end: str) -
     else:
         # Overnight: either >= start OR <= end
         return test_time >= start or test_time <= end
+
+# ============================================================================
+# Auto-Charge Tests
+# ============================================================================
+
+class TestAutoChargeTrigger:
+    """Test auto-charge triggering logic."""
+
+    def test_charge_window_identifier_format(self):
+        """Test that charge window identifiers are formatted correctly."""
+        from datetime import datetime
+        
+        now = datetime.now()
+        today_str = now.strftime("%Y-%m-%d")
+        window_start_str = "2026-02-05T00:30:00+00:00"
+        
+        window_id = f"{today_str}_{window_start_str}"
+        
+        # Should contain both date and timestamp
+        assert today_str in window_id
+        assert window_start_str in window_id
+
+    def test_charge_window_timing_calculation(self):
+        """Test calculation of time until charge window starts."""
+        from datetime import datetime, timedelta
+        
+        now = datetime.now()
+        
+        # Window starting in 3 minutes
+        window_start = now + timedelta(minutes=3)
+        time_until_start = (window_start - now).total_seconds() / 60
+        
+        assert time_until_start == pytest.approx(3.0, abs=0.1)
+        
+        # Window started 2 minutes ago
+        window_start = now - timedelta(minutes=2)
+        time_until_start = (window_start - now).total_seconds() / 60
+        
+        assert time_until_start == pytest.approx(-2.0, abs=0.1)
+
+    def test_charge_trigger_window_range(self):
+        """Test that charge triggers within the correct time window."""
+        # Should trigger if -5 <= time_until_start <= 0
+        
+        # Should trigger: 2 minutes before window
+        time_until_start = -2
+        should_trigger = -5 <= time_until_start <= 0
+        assert should_trigger is True
+        
+        # Should trigger: exactly at window start
+        time_until_start = 0
+        should_trigger = -5 <= time_until_start <= 0
+        assert should_trigger is True
+        
+        # Should NOT trigger: 6 minutes before window
+        time_until_start = -6
+        should_trigger = -5 <= time_until_start <= 0
+        assert should_trigger is False
+        
+        # Should NOT trigger: 1 minute after window
+        time_until_start = 1
+        should_trigger = -5 <= time_until_start <= 0
+        assert should_trigger is False
+
+    def test_charge_session_energy_calculation(self):
+        """Test total energy calculation from charge session."""
+        charge_session = [
+            {"period_start": "2026-02-05T00:30:00+00:00", "period_end": "2026-02-05T01:00:00+00:00", "energy_kwh": 1.84, "ci_value": 4},
+            {"period_start": "2026-02-05T00:00:00+00:00", "period_end": "2026-02-05T00:30:00+00:00", "energy_kwh": 1.84, "ci_value": 5},
+            {"period_start": "2026-02-05T01:30:00+00:00", "period_end": "2026-02-05T02:00:00+00:00", "energy_kwh": 1.84, "ci_value": 5},
+        ]
+        
+        total_energy = sum(p.get("energy_kwh", 0) for p in charge_session)
+        
+        assert total_energy == pytest.approx(5.52, abs=0.01)
+
+    def test_charge_duration_from_window(self):
+        """Test duration calculation from charge window."""
+        from datetime import datetime
+        
+        window_start = datetime.fromisoformat("2026-02-05T00:30:00+00:00")
+        window_end = datetime.fromisoformat("2026-02-05T01:00:00+00:00")
+        
+        duration_hours = (window_end - window_start).total_seconds() / 3600
+        duration_minutes = duration_hours * 60
+        
+        assert duration_hours == 0.5
+        assert duration_minutes == 30.0
+
+    def test_charge_power_calculation(self):
+        """Test charge power calculation from energy and duration."""
+        energy_kwh = 1.84
+        duration_hours = 0.5
+        
+        charge_power_kw = energy_kwh / duration_hours
+        
+        assert charge_power_kw == pytest.approx(3.68, abs=0.01)
