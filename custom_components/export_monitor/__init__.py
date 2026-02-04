@@ -328,6 +328,8 @@ async def async_setup_services(
             domain,
             service,
             {"entity_id": discharge_button_entity},
+            entity_id=discharge_button_entity,
+            expected_value="on",
         )
         
         if not success:
@@ -354,35 +356,42 @@ async def async_setup_services(
         coordinator.set_discharge_active(True, current_grid_export, target_energy)
         coordinator.clear_error_state()
         
-        # Clear any previous error notifications
-        await hass.services.async_call(
-            "persistent_notification",
-            "dismiss",
-            {
-                "notification_id": "export_monitor_soc_read_failed",
-            },
-        )
-        await hass.services.async_call(
-            "persistent_notification",
-            "dismiss",
-            {
-                "notification_id": "export_monitor_stale_data",
-            },
-        )
-        await hass.services.async_call(
-            "persistent_notification",
-            "dismiss",
-            {
-                "notification_id": "export_monitor_discharge_power_failed",
-            },
-        )
-        await hass.services.async_call(
-            "persistent_notification",
-            "dismiss",
-            {
-                "notification_id": "export_monitor_discharge_start_failed",
-            },
-        )
+        # Clear any previous error notifications (best-effort cleanup)
+        try:
+            await hass.services.async_call(
+                "persistent_notification",
+                "dismiss",
+                {
+                    "notification_id": "export_monitor_soc_read_failed",
+                },
+            )
+            await hass.services.async_call(
+                "persistent_notification",
+                "dismiss",
+                {
+                    "notification_id": "export_monitor_stale_data",
+                },
+            )
+            await hass.services.async_call(
+                "persistent_notification",
+                "dismiss",
+                {
+                    "notification_id": "export_monitor_discharge_power_failed",
+                },
+            )
+            await hass.services.async_call(
+                "persistent_notification",
+                "dismiss",
+                {
+                    "notification_id": "export_monitor_discharge_start_failed",
+                },
+            )
+        except Exception as err:
+            # Non-critical; log and continue
+            _LOGGER.warning(
+                "Failed to dismiss error notifications: %s",
+                err,
+            )
 
         _LOGGER.info(
             "Started discharge: %.3f kW for %.1f min (cutoff SOC: %.0f%%, target: %.3f kWh)",
@@ -404,6 +413,8 @@ async def async_setup_services(
             domain,
             service,
             {"entity_id": discharge_button_entity},
+            entity_id=discharge_button_entity,
+            expected_value="off",
         )
         
         if not success:
@@ -421,14 +432,21 @@ async def async_setup_services(
         coordinator.set_discharge_active(False)
         coordinator.clear_error_state()
         
-        # Clear stop failure notification if it exists
-        await hass.services.async_call(
-            "persistent_notification",
-            "dismiss",
-            {
-                "notification_id": "export_monitor_discharge_stop_failed",
-            },
-        )
+        # Clear stop failure notification if it exists (best-effort cleanup)
+        try:
+            await hass.services.async_call(
+                "persistent_notification",
+                "dismiss",
+                {
+                    "notification_id": "export_monitor_discharge_stop_failed",
+                },
+            )
+        except Exception as err:
+            # Non-critical; log and continue
+            _LOGGER.warning(
+                "Failed to dismiss discharge stop failure notification: %s",
+                err,
+            )
 
         _LOGGER.info("Stopped discharge")
 

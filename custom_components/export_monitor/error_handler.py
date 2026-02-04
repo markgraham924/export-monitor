@@ -138,29 +138,46 @@ async def safe_service_call(
                 _LOGGER.error("Entity %s not found after service call", entity_id)
                 return False
             
+            # Unknown or unavailable states are treated as verification failures for critical operations
+            if state.state in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+                _LOGGER.error(
+                    "Entity %s state is %s after service call; cannot verify expected value %s",
+                    entity_id,
+                    state.state,
+                    expected_value,
+                )
+                return False
+            
             # Convert expected_value to string for comparison
             expected_str = str(expected_value)
-            if state.state not in [expected_str, STATE_UNKNOWN, STATE_UNAVAILABLE]:
-                # Allow some tolerance for float comparisons
-                try:
-                    state_val = float(state.state)
-                    expected_val = float(expected_value)
-                    if abs(state_val - expected_val) > 0.01:
-                        _LOGGER.error(
-                            "Entity %s state mismatch after service call: got %s, expected %s",
-                            entity_id,
-                            state.state,
-                            expected_str,
-                        )
-                        return False
-                except (ValueError, TypeError):
-                    if state.state != expected_str:
-                        _LOGGER.warning(
-                            "Entity %s state differs: got %s, expected %s",
-                            entity_id,
-                            state.state,
-                            expected_str,
-                        )
+            
+            # Direct string match: treat as verified success
+            if state.state == expected_str:
+                return True
+            
+            # Allow some tolerance for float comparisons when direct string match fails
+            try:
+                state_val = float(state.state)
+                expected_val = float(expected_value)
+                if abs(state_val - expected_val) > 0.01:
+                    _LOGGER.error(
+                        "Entity %s state mismatch after service call: got %s, expected %s",
+                        entity_id,
+                        state.state,
+                        expected_str,
+                    )
+                    return False
+                
+                # Float comparison within tolerance: treat as success
+                return True
+            except (ValueError, TypeError):
+                _LOGGER.warning(
+                    "Entity %s state differs and cannot be compared numerically: got %s, expected %s",
+                    entity_id,
+                    state.state,
+                    expected_str,
+                )
+                return False
 
         return True
 

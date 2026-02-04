@@ -67,7 +67,6 @@ from .error_handler import (
     CircuitBreaker,
     StaleDataDetector,
     get_safe_sensor_value,
-    validate_sensor_value,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -972,12 +971,6 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
             pv_energy_today = self._get_sensor_value(config_data[CONF_PV_ENERGY_TODAY], "energy")
             grid_feed_today = self._get_sensor_value(config_data[CONF_GRID_FEED_TODAY], "energy")
             solcast_total_today = self._get_sensor_value(config_data[CONF_SOLCAST_TOTAL_TODAY], "energy")
-            solcast_forecast_so_far = config_data.get(CONF_SOLCAST_FORECAST_SO_FAR)
-            solcast_forecast_so_far_value = (
-                self._get_sensor_value(solcast_forecast_so_far, "energy")
-                if solcast_forecast_so_far
-                else None
-            )
 
             # Check for missing values
             required_values = [
@@ -992,6 +985,7 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
 
             # Get configuration values
             target_export = config_data.get(CONF_TARGET_EXPORT, DEFAULT_TARGET_EXPORT)
+            target_export_kwh = target_export / 1000  # Convert W to kWh for calculations
             min_soc = config_data.get(CONF_MIN_SOC, DEFAULT_MIN_SOC)
             safety_margin = config_data.get(CONF_SAFETY_MARGIN, DEFAULT_SAFETY_MARGIN)
             

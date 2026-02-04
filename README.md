@@ -249,7 +249,6 @@ Located in the **Diagnostic** entity category - essential for production monitor
   - **Attributes**: failure_count, last_failure_time, can_attempt
 
 **⚠️ Monitor these sensors regularly in production!** See [PRODUCTION_GUIDE.md](PRODUCTION_GUIDE.md) for details.
-- **Total Plan Energy** (kWh): Combined energy across all planned windows
 
 #### Charge Planning Sensors
 - **Charge Plan Today** (string): Formatted charge windows for today (HH:MM - HH:MM X.XXkWh)
