@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.1] - 2026-02-04
+
+### Fixed
+- **Overnight Charge Window Logic**: Fixed condition bug that prevented next charge session from being calculated
+  - Bug: Used AND instead of OR in window boundary check (`current_time < start AND current_time > end` is impossible)
+  - Now correctly identifies next charge window for overnight schedules (e.g., 00:00-07:00)
+  - Periods within next window are properly filtered and included in charge plan
+  - Next Charge Session sensor now displays data when charge planning is enabled
+
 ## [1.9.0] - 2026-02-04
 
 ### Changed
