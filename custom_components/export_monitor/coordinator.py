@@ -1254,13 +1254,12 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
         """
         self._charge_active = active
         if active:
-            import datetime
-            self._charge_start_time = datetime.datetime.now()
+            from datetime import datetime, timezone
+            self._charge_start_time = datetime.now(timezone.utc)
             _LOGGER.info("Charge started at %s", self._charge_start_time)
         else:
             self._charge_start_time = None
             _LOGGER.info("Charge stopped")
-            _LOGGER.info("Discharge stopped")
 
     async def _check_and_trigger_auto_discharge(
         self,
@@ -1364,20 +1363,21 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
         Args:
             charge_session: Next charge session plan with start/end times and energy
         """
-        import datetime
+        from datetime import datetime, timezone
         
         if not charge_session or len(charge_session) == 0:
             return
         
-        now = datetime.datetime.now()
-        today_str = now.strftime("%Y-%m-%d")
+        now = datetime.now(timezone.utc)
         
-        # Reset auto-charge window tracking at midnight
-        if self._last_auto_charge_window and today_str not in self._last_auto_charge_window:
-            self._last_auto_charge_window = None
+        # Sort windows chronologically by start time
+        sorted_windows = sorted(
+            charge_session,
+            key=lambda w: datetime.fromisoformat(w.get("period_start", "9999-12-31T23:59:59+00:00"))
+        )
         
-        # Check each window in the charge session
-        for window in charge_session:
+        # Check each window in chronological order
+        for window in sorted_windows:
             window_start_str = window.get("period_start", "")
             window_end_str = window.get("period_end", "")
             window_energy = window.get("energy_kwh", 0)
@@ -1386,22 +1386,28 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                 continue
             
             try:
-                # Parse window start time
-                window_start = datetime.datetime.fromisoformat(window_start_str)
-                window_end = datetime.datetime.fromisoformat(window_end_str)
+                # Parse window start time (timezone-aware)
+                window_start = datetime.fromisoformat(window_start_str)
+                window_end = datetime.fromisoformat(window_end_str)
                 
-                # Create a window identifier for tracking
-                window_id = f"{today_str}_{window_start_str}"
+                # Create a window identifier using the window's own date
+                window_date_str = window_start.strftime("%Y-%m-%d")
+                window_id = f"{window_date_str}_{window_start_str}"
                 
-                # Skip if we've already triggered this window today
+                # Skip if we've already triggered this window
                 if self._last_auto_charge_window == window_id:
                     continue
                 
-                # Check if we're within the window start +/- 5 minutes
+                # Reset tracking at midnight
+                current_date_str = now.strftime("%Y-%m-%d")
+                if self._last_auto_charge_window and current_date_str not in self._last_auto_charge_window:
+                    self._last_auto_charge_window = None
+                
+                # Check how many minutes remain until the window starts
                 time_until_start = (window_start - now).total_seconds() / 60
                 
-                # Trigger if we're within 5 minutes before start or already in the window
-                if -5 <= time_until_start <= 0 and not self._charge_active:
+                # Trigger if we're within 5 minutes before the window start
+                if 0 <= time_until_start <= 5 and not self._charge_active:
                     _LOGGER.info(
                         "Auto-charge triggered for window %s - %s (%.3f kWh)",
                         window_start.strftime("%H:%M"),

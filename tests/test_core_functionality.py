@@ -747,26 +747,26 @@ class TestAutoChargeTrigger:
 
     def test_charge_trigger_window_range(self):
         """Test that charge triggers within the correct time window."""
-        # Should trigger if -5 <= time_until_start <= 0
+        # Should trigger if 0 <= time_until_start <= 5 (within 5 minutes before window starts)
         
-        # Should trigger: 2 minutes before window
-        time_until_start = -2
-        should_trigger = -5 <= time_until_start <= 0
+        # Should trigger: 2 minutes before window starts
+        time_until_start = 2
+        should_trigger = 0 <= time_until_start <= 5
         assert should_trigger is True
         
         # Should trigger: exactly at window start
         time_until_start = 0
-        should_trigger = -5 <= time_until_start <= 0
+        should_trigger = 0 <= time_until_start <= 5
         assert should_trigger is True
         
-        # Should NOT trigger: 6 minutes before window
-        time_until_start = -6
-        should_trigger = -5 <= time_until_start <= 0
+        # Should NOT trigger: 6 minutes before window starts
+        time_until_start = 6
+        should_trigger = 0 <= time_until_start <= 5
         assert should_trigger is False
         
-        # Should NOT trigger: 1 minute after window
-        time_until_start = 1
-        should_trigger = -5 <= time_until_start <= 0
+        # Should NOT trigger: 1 minute after window started
+        time_until_start = -1
+        should_trigger = 0 <= time_until_start <= 5
         assert should_trigger is False
 
     def test_charge_session_energy_calculation(self):

@@ -52,15 +52,15 @@ self._last_auto_charge_window = None
 
 #### Auto-Charge Trigger Logic
 - Monitors `next_charge_session` sensor every 10 seconds
-- Triggers 5 minutes before charge window starts
+- Triggers up to 5 minutes before charge window starts
 - Prevents duplicate triggers per window
 - Automatically sets power, duration, and SOC
 
 #### Charge Execution Flow
-1. Check if within charge window trigger range (-5 to 0 minutes)
-2. Calculate power from energy/duration of first window
+1. Check if within 5 minutes before charge window starts (0 to 5 minutes)
+2. Calculate total power from total energy across all windows / total duration
 3. Set charge power via configured entity
-4. Set duration from charge window period
+4. Set total duration from all charge windows
 5. Set cutoff SOC to 100%
 6. Enable force charging button
 7. Track charge state

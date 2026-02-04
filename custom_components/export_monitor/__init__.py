@@ -347,22 +347,36 @@ async def async_setup_services(
             _LOGGER.error("Charge control entities not configured")
             return
         
-        # Calculate charge duration from first window
-        first_window = charge_session[0]
+        # Calculate total charge duration across all windows in chronological order
+        from datetime import datetime
+        
+        # Sort windows chronologically by start time
+        sorted_windows = sorted(
+            charge_session,
+            key=lambda w: datetime.fromisoformat(w.get("period_start", "9999-12-31T23:59:59+00:00"))
+        )
+        
+        total_duration_hours = 0.0
+        duration_minutes = 30  # Default fallback
+        
         try:
-            from datetime import datetime
-            window_start = datetime.fromisoformat(first_window.get("period_start", ""))
-            window_end = datetime.fromisoformat(first_window.get("period_end", ""))
-            duration_hours = (window_end - window_start).total_seconds() / 3600
-            duration_minutes = duration_hours * 60
+            for window in sorted_windows:
+                window_start = datetime.fromisoformat(window.get("period_start", ""))
+                window_end = datetime.fromisoformat(window.get("period_end", ""))
+                duration = (window_end - window_start).total_seconds() / 3600
+                if duration > 0:
+                    total_duration_hours += duration
+            
+            if total_duration_hours > 0:
+                duration_minutes = total_duration_hours * 60
         except (ValueError, TypeError) as err:
             _LOGGER.error("Error calculating charge duration: %s", err)
-            duration_minutes = 30  # Default to 30 minutes
+            total_duration_hours = 0.5  # Default to 30 minutes / 0.5 hours
+            duration_minutes = 30
         
-        # Get charge power from first window (energy / duration)
-        first_window_energy = first_window.get("energy_kwh", 0)
-        if duration_hours > 0:
-            charge_power_kw = first_window_energy / duration_hours
+        # Calculate charge power from total energy over total duration
+        if total_duration_hours > 0:
+            charge_power_kw = total_energy_kwh / total_duration_hours
         else:
             charge_power_kw = 3.68  # Default charge power
         
