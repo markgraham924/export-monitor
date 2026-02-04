@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.2] - 2026-02-04
+
+### Fixed
+- **CRITICAL: Charge Planning Dictionary Key Bug**: Charge planning was looking for wrong CI data key
+  - Bug: Code looked for `ci_data['data']` but `_parse_ci_forecast()` returns `ci_data['periods']`
+  - Impact: Charge planning always received empty periods list, causing "No charge session planned"
+  - This explains why charge session never populated despite multiple previous fixes
+  - Now uses correct 'periods' key matching parser output
+  - Added comprehensive debug logging for future troubleshooting
+
 ## [1.9.1] - 2026-02-04
 
 ### Fixed
