@@ -425,7 +425,7 @@ class DischargePlanSensor(ExportMonitorSensor):
 
     @property
     def native_value(self) -> str:
-        """Return plan summary."""
+        """Return detailed plan windows."""
         if not self.coordinator.data:
             return "No plan"
 
@@ -433,8 +433,23 @@ class DischargePlanSensor(ExportMonitorSensor):
         if not plan:
             return "No plan"
 
-        total_energy = sum(p.get("energy_kwh", 0) for p in plan)
-        return f"{len(plan)} windows, {total_energy:.2f} kWh"
+        windows = []
+        for p in plan:
+            try:
+                from_time = p.get("from", "")
+                to_time = p.get("to", "")
+                energy = p.get("energy_kwh", 0)
+                if from_time and to_time:
+                    from_hour = from_time.split("T")[1][:5] if "T" in from_time else ""
+                    to_hour = to_time.split("T")[1][:5] if "T" in to_time else ""
+                    if from_hour and to_hour:
+                        windows.append(f"{from_hour} - {to_hour} {energy:.2f}kWh")
+            except (ValueError, IndexError, AttributeError):
+                continue
+
+        if not windows:
+            return "No plan"
+        return "\n".join(windows)
 
 
 class DischargePlanTodaySensor(ExportMonitorSensor):
@@ -457,8 +472,24 @@ class DischargePlanTodaySensor(ExportMonitorSensor):
         plan = self.coordinator.data.get(ATTR_DISCHARGE_PLAN_TODAY, [])
         if not plan:
             return "No plan"
-        total_energy = sum(p.get("energy_kwh", 0) for p in plan)
-        return f"{len(plan)} windows, {total_energy:.2f} kWh"
+        
+        windows = []
+        for p in plan:
+            try:
+                from_time = p.get("from", "")
+                to_time = p.get("to", "")
+                energy = p.get("energy_kwh", 0)
+                if from_time and to_time:
+                    from_hour = from_time.split("T")[1][:5] if "T" in from_time else ""
+                    to_hour = to_time.split("T")[1][:5] if "T" in to_time else ""
+                    if from_hour and to_hour:
+                        windows.append(f"{from_hour} - {to_hour} {energy:.2f}kWh")
+            except (ValueError, IndexError, AttributeError):
+                continue
+        
+        if not windows:
+            return "No plan"
+        return "\n".join(windows)
 
 
 class DischargePlanTomorrowSensor(ExportMonitorSensor):
@@ -481,8 +512,24 @@ class DischargePlanTomorrowSensor(ExportMonitorSensor):
         plan = self.coordinator.data.get(ATTR_DISCHARGE_PLAN_TOMORROW, [])
         if not plan:
             return "No plan"
-        total_energy = sum(p.get("energy_kwh", 0) for p in plan)
-        return f"{len(plan)} windows, {total_energy:.2f} kWh"
+        
+        windows = []
+        for p in plan:
+            try:
+                from_time = p.get("from", "")
+                to_time = p.get("to", "")
+                energy = p.get("energy_kwh", 0)
+                if from_time and to_time:
+                    from_hour = from_time.split("T")[1][:5] if "T" in from_time else ""
+                    to_hour = to_time.split("T")[1][:5] if "T" in to_time else ""
+                    if from_hour and to_hour:
+                        windows.append(f"{from_hour} - {to_hour} {energy:.2f}kWh")
+            except (ValueError, IndexError, AttributeError):
+                continue
+        
+        if not windows:
+            return "No plan"
+        return "\n".join(windows)
 
 
 class GenericDiagnosticSensor(ExportMonitorSensor):
