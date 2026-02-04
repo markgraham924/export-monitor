@@ -925,8 +925,21 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
         charge_plan_today = []
         charge_plan_tomorrow = []
         enable_charge_planning = config_data.get(CONF_ENABLE_CHARGE_PLANNING, False)
-        if enable_charge_planning and parsed_ci:
-            periods = parsed_ci.get("data", [])
+        
+        # Fetch CI data for charge planning if needed
+        if enable_charge_planning:
+            ci_data = None
+            ci_sensor = config_data.get(CONF_CI_FORECAST_SENSOR)
+            if ci_sensor:
+                ci_state = self.hass.states.get(ci_sensor)
+                if ci_state:
+                    state_str = None
+                    if ci_state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+                        state_str = ci_state.state
+                    ci_data = self._parse_ci_forecast(state_str, ci_state.attributes)
+            
+            if ci_data:
+                periods = ci_data.get("data", [])
             if periods:
                 discharge_cutoff_soc_sensor = config_data.get(CONF_DISCHARGE_CUTOFF_SOC)
                 discharge_cutoff_soc_value = self._get_sensor_value(discharge_cutoff_soc_sensor) if discharge_cutoff_soc_sensor else 100
