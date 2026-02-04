@@ -150,13 +150,46 @@ After setup, the integration creates the following entities:
 ### Numbers
 - **Target Export**: Set maximum grid export target (W)
 - **Minimum SOC**: Set minimum battery level before discharge stops (%)
-- **Safety Margin**: Set safety buffer to prevent T&C breaches (W)
+- **Safety Margin**: Set safety buffer to prevent T&C breaches (kWh)
 
-### Sensors
-- **Safe Export Limit**: Current calculated safe export limit (W)
-- **Discharge Needed**: Amount of discharge power needed (W)
-- **Grid Export**: Current grid export power (W)
-- **Discharge Status**: Current status (Idle/Needed/Active)
+### Sensors & Controls
+
+#### Primary Monitoring Sensors
+- **Export Headroom** (kWh): Safe export capacity remaining today before exceeding target
+- **Discharge Needed** (W): Discharge power required to stay within export limits
+- **Discharge Status** (string): Current discharge state (Idle/Needed/Active)
+- **Calculated Duration** (minutes): Estimated discharge time based on headroom and discharge power
+- **Discharge Complete** (string): Whether discharge target has been reached
+- **Exported Today** (kWh): Total energy exported to grid today (cumulative)
+
+#### Reserve SOC Monitoring
+- **Reserve SOC Target** (%): Configured minimum battery level reserve
+- **Reserve SOC Status** (string): Reserve monitoring state (Normal/Limit Reached/Monitoring Disabled)
+
+#### Carbon Intensity Planning (Optional)
+- **Current Carbon Intensity** (gCO2/kWh): Current grid carbon intensity value
+- **Current Carbon Intensity Index** (string): CI intensity category (very_low/low/moderate/high)
+- **Discharge Plan** (string): Summary of planned discharge windows (count and energy)
+- **Discharge Plan Today** (string): Discharge plan for remainder of today
+- **Discharge Plan Tomorrow** (string): Full 24-hour discharge plan for tomorrow
+
+#### Plan Detail Sensors
+- **Plan Energy Today** (kWh): Total energy from planned discharge today
+- **Plan Energy Tomorrow** (kWh): Total energy from planned discharge tomorrow
+- **Plan Windows Today** (count): Number of discharge windows available today
+- **Plan Windows Tomorrow** (count): Number of discharge windows available tomorrow
+- **Plan Windows Total** (count): Total windows across all planned periods
+- **Total Plan Energy** (kWh): Combined energy across all planned windows
+
+#### Diagnostic Sensors
+Located in the **Diagnostic** entity category:
+- **Current PV** (W): Current solar production power
+- **Forecast PV Today** (kWh): Expected total solar production for today
+- **Current SOC** (%): Current battery state of charge
+- **Minimum SOC** (%): Configured minimum SOC threshold
+- **Export Allowed** (boolean): Whether grid export is currently allowed
+- **Observe Reserve SOC** (boolean): Whether reserve SOC monitoring is active
+- **Reserve Limit Reached** (boolean): Whether battery reserve limit has been breached
 
 ## Services
 
@@ -255,20 +288,66 @@ automation:
           value: 500
 ```
 
-## Dashboard Card Example
+## Dashboard Card Examples
+
+### Primary Monitoring Card
 
 ```yaml
 type: entities
 title: Energy Export Monitor
 entities:
   - entity: sensor.export_monitor_discharge_status
-  - entity: sensor.export_monitor_safe_export_limit
-  - entity: sensor.export_monitor_grid_export
+    name: Status
+  - entity: sensor.export_monitor_export_headroom
+    name: Safe Export Capacity
   - entity: sensor.export_monitor_discharge_needed
-  - entity: number.export_monitor_minimum_soc
-  - entity: number.export_monitor_safety_margin
+    name: Discharge Needed
+  - entity: sensor.export_monitor_calculated_duration
+    name: Duration Available
+  - entity: sensor.export_monitor_exported_today
+    name: Exported Today
   - entity: button.export_monitor_start_discharge
   - entity: button.export_monitor_stop_discharge
+```
+
+### Carbon Intensity Planning Card
+
+```yaml
+type: entities
+title: Carbon Intensity Planning
+entities:
+  - entity: sensor.export_monitor_current_carbon_intensity
+    name: Current CI
+  - entity: sensor.export_monitor_current_carbon_intensity_index
+    name: Intensity Level
+  - entity: sensor.export_monitor_discharge_plan_today
+    name: Plan (Today)
+  - entity: sensor.export_monitor_plan_energy_today
+    name: Energy Today
+  - entity: sensor.export_monitor_plan_windows_today
+    name: Windows Today
+  - entity: sensor.export_monitor_discharge_plan_tomorrow
+    name: Plan (Tomorrow)
+  - entity: sensor.export_monitor_plan_energy_tomorrow
+    name: Energy Tomorrow
+  - entity: sensor.export_monitor_plan_windows_tomorrow
+    name: Windows Tomorrow
+```
+
+### Configuration Card
+
+```yaml
+type: entities
+title: Energy Export Monitor Settings
+entities:
+  - entity: number.export_monitor_target_export
+  - entity: number.export_monitor_minimum_soc
+  - entity: number.export_monitor_safety_margin
+  - entity: sensor.export_monitor_reserve_soc_status
+    name: Reserve SOC Status
+  - entity: sensor.export_monitor_reserve_soc_target
+    name: Reserve SOC Target
+  - entity: button.export_monitor_calculate_discharge
 ```
 
 ## How the Calculation Works
