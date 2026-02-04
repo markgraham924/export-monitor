@@ -121,7 +121,6 @@ class ExportHeadroomSensor(ExportMonitorSensor):
 
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
-    _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(
         self,
@@ -566,7 +565,6 @@ class PlanEnergySensor(ExportMonitorSensor):
 
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(self, coordinator: ExportMonitorCoordinator, entry: ConfigEntry, plan_key: str, name: str) -> None:
         super().__init__(coordinator, entry, f"{plan_key}_energy", name, "mdi:lightning-bolt")

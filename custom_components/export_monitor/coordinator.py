@@ -927,7 +927,7 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
         enable_charge_planning = config_data.get(CONF_ENABLE_CHARGE_PLANNING, False)
         
         # Fetch CI data for charge planning if needed
-        if enable_charge_planning:
+        if enable_charge_planning and current_soc is not None:
             ci_data = None
             ci_sensor = config_data.get(CONF_CI_FORECAST_SENSOR)
             if ci_sensor:
@@ -940,42 +940,42 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
             
             if ci_data:
                 periods = ci_data.get("data", [])
-            if periods:
-                discharge_cutoff_soc_sensor = config_data.get(CONF_DISCHARGE_CUTOFF_SOC)
-                discharge_cutoff_soc_value = self._get_sensor_value(discharge_cutoff_soc_sensor) if discharge_cutoff_soc_sensor else 100
-                
-                charge_power_kw = config_data.get(CONF_CHARGE_POWER_KW, DEFAULT_CHARGE_POWER_KW)
-                charge_window_start = config_data.get(CONF_CHARGE_WINDOW_START, DEFAULT_CHARGE_WINDOW_START)
-                charge_window_end = config_data.get(CONF_CHARGE_WINDOW_END, DEFAULT_CHARGE_WINDOW_END)
-                
-                # Generate charge plan for today
-                charge_plan_today = self._generate_charge_plan_today(
-                    periods,
-                    current_soc,
-                    discharge_cutoff_soc_value,
-                    charge_power_kw,
-                    charge_window_start,
-                    charge_window_end,
-                )
-                _LOGGER.debug(
-                    "Generated today's CI charge plan: %d periods, %.3f kWh total",
-                    len(charge_plan_today),
-                    sum(p.get("energy_kwh", 0) for p in charge_plan_today),
-                )
-                
-                # Generate charge plan for tomorrow
-                charge_plan_tomorrow = self._generate_charge_plan_tomorrow(
-                    periods,
-                    discharge_cutoff_soc_value,
-                    charge_power_kw,
-                    charge_window_start,
-                    charge_window_end,
-                )
-                _LOGGER.debug(
-                    "Generated tomorrow's CI charge plan: %d periods, %.3f kWh total",
-                    len(charge_plan_tomorrow),
-                    sum(p.get("energy_kwh", 0) for p in charge_plan_tomorrow),
-                )
+                if periods:
+                    discharge_cutoff_soc_sensor = config_data.get(CONF_DISCHARGE_CUTOFF_SOC)
+                    discharge_cutoff_soc_value = self._get_sensor_value(discharge_cutoff_soc_sensor) if discharge_cutoff_soc_sensor else 100
+                    
+                    charge_power_kw = config_data.get(CONF_CHARGE_POWER_KW, DEFAULT_CHARGE_POWER_KW)
+                    charge_window_start = config_data.get(CONF_CHARGE_WINDOW_START, DEFAULT_CHARGE_WINDOW_START)
+                    charge_window_end = config_data.get(CONF_CHARGE_WINDOW_END, DEFAULT_CHARGE_WINDOW_END)
+                    
+                    # Generate charge plan for today
+                    charge_plan_today = self._generate_charge_plan_today(
+                        periods,
+                        current_soc,
+                        discharge_cutoff_soc_value,
+                        charge_power_kw,
+                        charge_window_start,
+                        charge_window_end,
+                    )
+                    _LOGGER.debug(
+                        "Generated today's CI charge plan: %d periods, %.3f kWh total",
+                        len(charge_plan_today),
+                        sum(p.get("energy_kwh", 0) for p in charge_plan_today),
+                    )
+                    
+                    # Generate charge plan for tomorrow
+                    charge_plan_tomorrow = self._generate_charge_plan_tomorrow(
+                        periods,
+                        discharge_cutoff_soc_value,
+                        charge_power_kw,
+                        charge_window_start,
+                        charge_window_end,
+                    )
+                    _LOGGER.debug(
+                        "Generated tomorrow's CI charge plan: %d periods, %.3f kWh total",
+                        len(charge_plan_tomorrow),
+                        sum(p.get("energy_kwh", 0) for p in charge_plan_tomorrow),
+                    )
 
         # Check for auto-discharge trigger
         enable_auto_discharge = config_data.get(CONF_ENABLE_AUTO_DISCHARGE, False)
