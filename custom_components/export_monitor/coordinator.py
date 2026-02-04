@@ -742,7 +742,8 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
         config_data = {**self.entry.data, **self.entry.options}
 
         # Get sensor values (kWh)
-        current_soc = self._get_sensor_value(config_data[CONF_CURRENT_SOC])
+        current_soc_sensor = config_data.get(CONF_CURRENT_SOC)
+        current_soc = self._get_sensor_value(current_soc_sensor) if current_soc_sensor else None
         pv_energy_today = self._get_sensor_value(config_data[CONF_PV_ENERGY_TODAY])
         grid_feed_today = self._get_sensor_value(config_data[CONF_GRID_FEED_TODAY])
         solcast_total_today = self._get_sensor_value(config_data[CONF_SOLCAST_TOTAL_TODAY])
