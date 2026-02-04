@@ -352,6 +352,41 @@ entities:
     name: Windows Tomorrow
 ```
 
+### Custom Dashboard Card
+
+For a beautiful, integrated 36-hour timeline view of your charge and discharge plans, install the **Export Monitor Card** custom card:
+
+#### Installation via HACS
+
+1. Open HACS → Frontend → Custom repositories
+2. Add: `https://github.com/markgraham924/export-monitor-card`
+3. Search for "Export Monitor Card" and install
+4. Restart Home Assistant
+
+#### Using in Dashboard
+
+```yaml
+type: custom:export-monitor-card
+charge_session_entity: sensor.energy_export_monitor_next_charge_session
+discharge_today_entity: sensor.energy_export_monitor_discharge_plan_today
+discharge_tomorrow_entity: sensor.energy_export_monitor_discharge_plan_tomorrow
+ci_entity: sensor.energy_export_monitor_current_carbon_intensity
+soc_entity: sensor.alphaess_battery_soc
+pv_entity: sensor.energy_export_monitor_current_pv
+headroom_entity: sensor.energy_export_monitor_export_headroom
+```
+
+#### Card Features
+
+- 📊 **36-Hour Timeline**: Visual timeline of all charge (green) and discharge (red) windows
+- ⚡ **Energy Visualization**: Color-coded bars showing kWh allocation per window
+- 🌍 **Carbon Intensity**: CI values displayed for each charge window
+- 📈 **Summary Stats**: Total charge/discharge energy, current PV, battery SOC
+- 🎨 **Responsive Design**: Works on mobile, tablet, and desktop with dark/light mode support
+- 📱 **Interactive**: Hover effects and smooth animations for better UX
+
+See [Export Monitor Card Repository](https://github.com/markgraham924/export-monitor-card) for full documentation.
+
 ### Configuration Card
 
 ```yaml
