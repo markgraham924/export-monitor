@@ -1,7 +1,7 @@
 """Data update coordinator for Energy Export Monitor."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 import json
 import logging
 from typing import Any
@@ -550,11 +550,13 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
         if energy_needed_kwh <= 0:
             return []
         
-        # Parse charge window times
+        # Parse charge window times (handle both HH:MM and HH:MM:SS formats)
         try:
-            window_start_hour, window_start_min = map(int, charge_window_start.split(":"))
-            window_end_hour, window_end_min = map(int, charge_window_end.split(":"))
-        except (ValueError, AttributeError):
+            start_parts = charge_window_start.split(":")
+            end_parts = charge_window_end.split(":")
+            window_start_hour, window_start_min = int(start_parts[0]), int(start_parts[1])
+            window_end_hour, window_end_min = int(end_parts[0]), int(end_parts[1])
+        except (ValueError, AttributeError, IndexError):
             _LOGGER.error("Invalid charge window times: %s - %s", charge_window_start, charge_window_end)
             return []
         
@@ -750,11 +752,13 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
         if energy_needed_kwh <= 0:
             return []
         
-        # Parse charge window times
+        # Parse charge window times (handle both HH:MM and HH:MM:SS formats)
         try:
-            window_start_hour, window_start_min = map(int, charge_window_start.split(":"))
-            window_end_hour, window_end_min = map(int, charge_window_end.split(":"))
-        except (ValueError, AttributeError):
+            start_parts = charge_window_start.split(":")
+            end_parts = charge_window_end.split(":")
+            window_start_hour, window_start_min = int(start_parts[0]), int(start_parts[1])
+            window_end_hour, window_end_min = int(end_parts[0]), int(end_parts[1])
+        except (ValueError, AttributeError, IndexError):
             _LOGGER.error("Invalid charge window times: %s - %s", charge_window_start, charge_window_end)
             return []
         
@@ -860,11 +864,13 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
         # This gives maximum flexibility for the next day
         energy_needed_kwh = battery_capacity_kwh
         
-        # Parse charge window times
+        # Parse charge window times (handle both HH:MM and HH:MM:SS formats)
         try:
-            window_start_hour, window_start_min = map(int, charge_window_start.split(":"))
-            window_end_hour, window_end_min = map(int, charge_window_end.split(":"))
-        except (ValueError, AttributeError):
+            start_parts = charge_window_start.split(":")
+            end_parts = charge_window_end.split(":")
+            window_start_hour, window_start_min = int(start_parts[0]), int(start_parts[1])
+            window_end_hour, window_end_min = int(end_parts[0]), int(end_parts[1])
+        except (ValueError, AttributeError, IndexError):
             _LOGGER.error("Invalid charge window times: %s - %s", charge_window_start, charge_window_end)
             return []
         
