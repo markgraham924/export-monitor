@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-02-04
+
+### Added
+- **Battery Charge Planning**: Intelligent charge planning identifies lowest carbon intensity periods within a user-defined window
+- **Charge Plan Sensors**: New sensors to display charge plans for today and tomorrow
+  - `sensor.charge_plan_today`: Shows optimal charging windows with energy allocation
+  - `sensor.charge_plan_tomorrow`: Tomorrow's planned charging periods
+- **Charge Window Configuration**: Time-based start/end selectors to define charging hours (default: 00:00 - 06:00 for overnight)
+- **Charge Power Setting**: Configurable charge power in kW (default: 3.68 kW)
+- **Lowest CI Prioritization**: Unlike discharge (high CI), charge planning selects **lowest carbon intensity periods** to minimize grid carbon impact during charging
+- **Energy Calculations**: Automatically calculates energy needed to reach 100% SOC from current battery state
+- **Comprehensive Tests**: Added 7 new unit tests for charge planning logic covering:
+  - Lowest CI period sorting
+  - Energy allocation across periods
+  - SOC to energy conversion
+  - Window filtering (normal and overnight windows)
+  - Multiple period allocation
+
+### Changed
+- Extended configuration flows (user, reconfigure, options) with charge planning controls
+
 ## [1.6.0] - 2026-02-05
 
 ### Added
