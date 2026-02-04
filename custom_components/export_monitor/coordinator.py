@@ -63,6 +63,12 @@ from .const import (
     DOMAIN,
     SERVICE_START_DISCHARGE,
 )
+from .error_handler import (
+    CircuitBreaker,
+    StaleDataDetector,
+    get_safe_sensor_value,
+    validate_sensor_value,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -89,19 +95,25 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
         self._discharge_start_time = None  # When discharge started
         self._calculated_duration = None  # Calculated discharge duration (minutes)
         self._last_auto_discharge_window = None  # Track which window was last auto-discharged
+        
+        # Error handling and monitoring
+        self._error_state: str | None = None
+        self._stale_data_detector = StaleDataDetector(max_age_seconds=30)
+        self._circuit_breaker = CircuitBreaker(
+            failure_threshold=5,
+            timeout_duration=60,
+            name="export_monitor_update"
+        )
 
-    def _get_sensor_value(self, entity_id: str) -> float | None:
-        """Get sensor value as float."""
-        state = self.hass.states.get(entity_id)
-        if state is None or state.state in [STATE_UNKNOWN, STATE_UNAVAILABLE]:
-            _LOGGER.warning("Sensor %s is unavailable", entity_id)
-            return None
-
-        try:
-            return float(state.state)
-        except (ValueError, TypeError) as err:
-            _LOGGER.error("Cannot convert %s state to float: %s", entity_id, err)
-            return None
+    def _get_sensor_value(self, entity_id: str, sensor_type: str = "energy", custom_range: tuple[float, float] | None = None) -> float | None:
+        """Get sensor value as float with validation."""
+        return get_safe_sensor_value(
+            self.hass,
+            entity_id,
+            sensor_type,
+            default=None,
+            custom_range=custom_range,
+        )
 
     def _calculate_export_headroom(
         self,
@@ -943,263 +955,285 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from sensors and calculate discharge requirements."""
-        config_data = {**self.entry.data, **self.entry.options}
+        # Check circuit breaker
+        if not self._circuit_breaker.can_attempt():
+            _LOGGER.warning(
+                "Circuit breaker is open, skipping update (failures: %d)",
+                self._circuit_breaker.failure_count,
+            )
+            raise UpdateFailed("Circuit breaker is open due to repeated failures")
+        
+        try:
+            config_data = {**self.entry.data, **self.entry.options}
 
-        # Get sensor values (kWh)
-        current_soc_sensor = config_data.get(CONF_CURRENT_SOC)
-        current_soc = self._get_sensor_value(current_soc_sensor) if current_soc_sensor else None
-        pv_energy_today = self._get_sensor_value(config_data[CONF_PV_ENERGY_TODAY])
-        grid_feed_today = self._get_sensor_value(config_data[CONF_GRID_FEED_TODAY])
-        solcast_total_today = self._get_sensor_value(config_data[CONF_SOLCAST_TOTAL_TODAY])
-        solcast_forecast_so_far = config_data.get(CONF_SOLCAST_FORECAST_SO_FAR)
-        solcast_forecast_so_far_value = (
-            self._get_sensor_value(solcast_forecast_so_far)
-            if solcast_forecast_so_far
-            else None
-        )
+            # Get sensor values (kWh) with appropriate types
+            current_soc_sensor = config_data.get(CONF_CURRENT_SOC)
+            current_soc = self._get_sensor_value(current_soc_sensor, "soc") if current_soc_sensor else None
+            pv_energy_today = self._get_sensor_value(config_data[CONF_PV_ENERGY_TODAY], "energy")
+            grid_feed_today = self._get_sensor_value(config_data[CONF_GRID_FEED_TODAY], "energy")
+            solcast_total_today = self._get_sensor_value(config_data[CONF_SOLCAST_TOTAL_TODAY], "energy")
+            solcast_forecast_so_far = config_data.get(CONF_SOLCAST_FORECAST_SO_FAR)
+            solcast_forecast_so_far_value = (
+                self._get_sensor_value(solcast_forecast_so_far, "energy")
+                if solcast_forecast_so_far
+                else None
+            )
 
-        # Check for missing values
-        required_values = [
-            current_soc,
-            pv_energy_today,
-            grid_feed_today,
-            solcast_total_today,
-        ]
-        if any(v is None for v in required_values):
-            raise UpdateFailed("One or more sensors unavailable")
+            # Check for missing values
+            required_values = [
+                current_soc,
+                pv_energy_today,
+                grid_feed_today,
+                solcast_total_today,
+            ]
+            if any(v is None for v in required_values):
+                self._circuit_breaker.record_failure()
+                raise UpdateFailed("One or more sensors unavailable")
 
-        # Get configuration values
-        target_export = config_data.get(CONF_TARGET_EXPORT, DEFAULT_TARGET_EXPORT)
-        min_soc = config_data.get(CONF_MIN_SOC, DEFAULT_MIN_SOC)
-        safety_margin = config_data.get(CONF_SAFETY_MARGIN, DEFAULT_SAFETY_MARGIN)
-        
-        # Get reserve SOC configuration
-        reserve_soc_sensor = config_data.get(CONF_RESERVE_SOC_SENSOR)
-        observe_reserve_soc = config_data.get(CONF_OBSERVE_RESERVE_SOC, DEFAULT_OBSERVE_RESERVE_SOC)
-        reserve_soc_target = None
-        reserve_limit_reached = False
-        
-        if reserve_soc_sensor and observe_reserve_soc:
-            reserve_soc_target = self._get_sensor_value(reserve_soc_sensor)
-            if reserve_soc_target is not None and current_soc < reserve_soc_target:
-                reserve_limit_reached = True
-                _LOGGER.warning(
-                    "Reserve SOC limit reached: current %.1f%% < reserve target %.1f%%",
-                    current_soc,
-                    reserve_soc_target,
-                )
-
-        # Calculate export cap and headroom (kWh)
-        export_cap_kwh, headroom_kwh = self._calculate_export_headroom(
-            pv_energy_today,
-            solcast_total_today,
-            grid_feed_today,
-            safety_margin,
-        )
-
-        # Calculate discharge power and duration
-        recommended_discharge_w = 0.0
-        calculated_duration_minutes = 0.0
-        
-        if current_soc > min_soc and headroom_kwh > 0:
-            if target_export > 0:
-                # Use target_export as the discharge power
-                recommended_discharge_w = target_export
-                # Calculate duration based on headroom and target power
-                calculated_duration_minutes = self._calculate_discharge_duration(
-                    headroom_kwh, target_export
-                )
-            else:
-                # If no target_export configured, calculate based on headroom
-                # Base: discharge over 1 hour. Duration will include 10% buffer via calculation.
-                recommended_discharge_w = headroom_kwh * 1000
-                calculated_duration_minutes = self._calculate_discharge_duration(
-                    headroom_kwh, recommended_discharge_w
-                )
-        
-        # Store calculated duration for service use
-        self._calculated_duration = calculated_duration_minutes
-        
-        # Check if discharge is active and we've exported enough
-        discharge_complete = False
-        if self._discharge_active and self._discharge_start_export is not None:
-            energy_exported_since_start = grid_feed_today - self._discharge_start_export
-            if self._discharge_target_energy and energy_exported_since_start >= self._discharge_target_energy:
-                discharge_complete = True
-                _LOGGER.info(
-                    "Discharge target reached: exported %.3f kWh (target: %.3f kWh)",
-                    energy_exported_since_start,
-                    self._discharge_target_energy,
-                )
-        
-        # Auto-stop discharge if any limit is reached
-        should_stop_discharge = False
-        stop_reason = ""
-        
-        if self._discharge_active:
-            # Check headroom exhausted (most critical - prevents export limit breach)
-            if headroom_kwh <= 0:
-                should_stop_discharge = True
-                stop_reason = f"Export headroom exhausted ({headroom_kwh:.3f} kWh)"
-            # Check discharge target reached
-            elif discharge_complete:
-                should_stop_discharge = True
-                stop_reason = "Discharge target reached"
-            # Check reserve SOC limit
-            elif reserve_limit_reached:
-                should_stop_discharge = True
-                stop_reason = f"Reserve SOC limit reached ({current_soc:.1f}% < {reserve_soc_target:.1f}%)"
+            # Get configuration values
+            target_export = config_data.get(CONF_TARGET_EXPORT, DEFAULT_TARGET_EXPORT)
+            min_soc = config_data.get(CONF_MIN_SOC, DEFAULT_MIN_SOC)
+            safety_margin = config_data.get(CONF_SAFETY_MARGIN, DEFAULT_SAFETY_MARGIN)
             
-            if should_stop_discharge:
-                _LOGGER.warning("Auto-stopping discharge: %s", stop_reason)
-                # Call the stop discharge service
-                self.hass.async_create_task(
-                    self.hass.services.async_call(
-                        DOMAIN,
-                        "stop_discharge",
-                        {},
+            # Get reserve SOC configuration
+            reserve_soc_sensor = config_data.get(CONF_RESERVE_SOC_SENSOR)
+            observe_reserve_soc = config_data.get(CONF_OBSERVE_RESERVE_SOC, DEFAULT_OBSERVE_RESERVE_SOC)
+            reserve_soc_target = None
+            reserve_limit_reached = False
+            
+            if reserve_soc_sensor and observe_reserve_soc:
+                reserve_soc_target = self._get_sensor_value(reserve_soc_sensor, "soc")
+                if reserve_soc_target is not None and current_soc < reserve_soc_target:
+                    reserve_limit_reached = True
+                    _LOGGER.warning(
+                        "Reserve SOC limit reached: current %.1f%% < reserve target %.1f%%",
+                        current_soc,
+                        reserve_soc_target,
                     )
-                )
 
-        # CI Planning (optional feature) - generate today and tomorrow plans
-        discharge_plan_today = []
-        discharge_plan_tomorrow = []
-        current_ci_value = None
-        current_ci_index = None
+            # Calculate export cap and headroom (kWh)
+            export_cap_kwh, headroom_kwh = self._calculate_export_headroom(
+                pv_energy_today,
+                solcast_total_today,
+                grid_feed_today,
+                safety_margin,
+            )
 
-        ci_sensor = config_data.get(CONF_CI_FORECAST_SENSOR)
-        enable_ci_planning = config_data.get(CONF_ENABLE_CI_PLANNING, DEFAULT_ENABLE_CI_PLANNING)
-
-        if ci_sensor and enable_ci_planning and target_export > 0:
-            ci_state = self.hass.states.get(ci_sensor)
-            if ci_state:
-                state_str = None
-                if ci_state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
-                    state_str = ci_state.state
-                ci_data = self._parse_ci_forecast(state_str, ci_state.attributes)
-                if ci_data:
-                    periods = ci_data.get("periods", [])
-                    # Get current CI
-                    current_ci_value, current_ci_index = self._get_current_ci_index(periods)
-                    
-                    discharge_power_kw = target_export / 1000
-                    
-                    # Get export window from config
-                    export_window_start = config_data.get(CONF_EXPORT_WINDOW_START, DEFAULT_EXPORT_WINDOW_START)
-                    export_window_end = config_data.get(CONF_EXPORT_WINDOW_END, DEFAULT_EXPORT_WINDOW_END)
-                    
-                    # Generate plan for today (remaining hours until midnight)
-                    if headroom_kwh > 0:
-                        discharge_plan_today = self._generate_today_plan(
-                            periods,
-                            headroom_kwh,
-                            discharge_power_kw,
-                            pv_energy_today,
-                            solcast_total_today,
-                            export_window_start,
-                            export_window_end,
-                        )
-                        _LOGGER.debug(
-                            "Generated today's CI discharge plan: %d periods, %.3f kWh total",
-                            len(discharge_plan_today),
-                            sum(p.get("energy_kwh", 0) for p in discharge_plan_today),
-                        )
-                    
-                    # Generate plan for tomorrow using predicted solar
-                    solcast_tomorrow = config_data.get(CONF_SOLCAST_TOMORROW)
-                    solcast_tomorrow_value = (
-                        self._get_sensor_value(solcast_tomorrow)
-                        if solcast_tomorrow
-                        else None
+            # Calculate discharge power and duration
+            recommended_discharge_w = 0.0
+            calculated_duration_minutes = 0.0
+            
+            if current_soc > min_soc and headroom_kwh > 0:
+                if target_export > 0:
+                    # Use target_export as the discharge power
+                    recommended_discharge_w = target_export
+                    # Calculate duration based on headroom and target power
+                    calculated_duration_minutes = self._calculate_discharge_duration(
+                        headroom_kwh, target_export
                     )
-                    if solcast_tomorrow_value and solcast_tomorrow_value > 0:
-                        discharge_plan_tomorrow = self._generate_tomorrow_plan(
-                            periods,
-                            solcast_tomorrow_value,
-                            discharge_power_kw,
-                            export_window_start,
-                            export_window_end,
-                        )
-                        _LOGGER.debug(
-                            "Generated tomorrow's CI discharge plan: %d periods, %.3f kWh total",
-                            len(discharge_plan_tomorrow),
-                            sum(p.get("energy_kwh", 0) for p in discharge_plan_tomorrow),
-                        )
-
-        # Generate charge plan for next charge session if charge planning is enabled
-        next_charge_session = []
-        enable_charge_planning = config_data.get(CONF_ENABLE_CHARGE_PLANNING, False)
+                else:
+                    # If no target_export configured, calculate based on headroom
+                    # Base: discharge over 1 hour. Duration will include 10% buffer via calculation.
+                    recommended_discharge_w = headroom_kwh * 1000
+                    calculated_duration_minutes = self._calculate_discharge_duration(
+                        headroom_kwh, recommended_discharge_w
+                    )
+            
+            # Store calculated duration for service use
+            self._calculated_duration = calculated_duration_minutes
         
-        # Fetch CI data for charge planning if needed
-        if enable_charge_planning and current_soc is not None:
-            ci_data = None
+            # Check if discharge is active and we've exported enough
+            discharge_complete = False
+            if self._discharge_active and self._discharge_start_export is not None:
+                energy_exported_since_start = grid_feed_today - self._discharge_start_export
+                if self._discharge_target_energy and energy_exported_since_start >= self._discharge_target_energy:
+                    discharge_complete = True
+                    _LOGGER.info(
+                        "Discharge target reached: exported %.3f kWh (target: %.3f kWh)",
+                        energy_exported_since_start,
+                        self._discharge_target_energy,
+                    )
+            
+            # Auto-stop discharge if any limit is reached
+            should_stop_discharge = False
+            stop_reason = ""
+            
+            if self._discharge_active:
+                # Check headroom exhausted (most critical - prevents export limit breach)
+                if headroom_kwh <= 0:
+                    should_stop_discharge = True
+                    stop_reason = f"Export headroom exhausted ({headroom_kwh:.3f} kWh)"
+                # Check discharge target reached
+                elif discharge_complete:
+                    should_stop_discharge = True
+                    stop_reason = "Discharge target reached"
+                # Check reserve SOC limit
+                elif reserve_limit_reached:
+                    should_stop_discharge = True
+                    stop_reason = f"Reserve SOC limit reached ({current_soc:.1f}% < {reserve_soc_target:.1f}%)"
+                
+                if should_stop_discharge:
+                    _LOGGER.warning("Auto-stopping discharge: %s", stop_reason)
+                    # Call the stop discharge service
+                    self.hass.async_create_task(
+                        self.hass.services.async_call(
+                            DOMAIN,
+                            "stop_discharge",
+                            {},
+                        )
+                    )
+
+            # CI Planning (optional feature) - generate today and tomorrow plans
+            discharge_plan_today = []
+            discharge_plan_tomorrow = []
+            current_ci_value = None
+            current_ci_index = None
+
             ci_sensor = config_data.get(CONF_CI_FORECAST_SENSOR)
-            if ci_sensor:
+            enable_ci_planning = config_data.get(CONF_ENABLE_CI_PLANNING, DEFAULT_ENABLE_CI_PLANNING)
+
+            if ci_sensor and enable_ci_planning and target_export > 0:
                 ci_state = self.hass.states.get(ci_sensor)
                 if ci_state:
                     state_str = None
                     if ci_state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
                         state_str = ci_state.state
                     ci_data = self._parse_ci_forecast(state_str, ci_state.attributes)
+                    if ci_data:
+                        periods = ci_data.get("periods", [])
+                        # Get current CI
+                        current_ci_value, current_ci_index = self._get_current_ci_index(periods)
+                        
+                        discharge_power_kw = target_export / 1000
+                        
+                        # Get export window from config
+                        export_window_start = config_data.get(CONF_EXPORT_WINDOW_START, DEFAULT_EXPORT_WINDOW_START)
+                        export_window_end = config_data.get(CONF_EXPORT_WINDOW_END, DEFAULT_EXPORT_WINDOW_END)
+                        
+                        # Generate plan for today (remaining hours until midnight)
+                        if headroom_kwh > 0:
+                            discharge_plan_today = self._generate_today_plan(
+                                periods,
+                                headroom_kwh,
+                                discharge_power_kw,
+                                pv_energy_today,
+                                solcast_total_today,
+                                export_window_start,
+                                export_window_end,
+                            )
+                            _LOGGER.debug(
+                                "Generated today's CI discharge plan: %d periods, %.3f kWh total",
+                                len(discharge_plan_today),
+                                sum(p.get("energy_kwh", 0) for p in discharge_plan_today),
+                            )
+                        
+                        # Generate plan for tomorrow using predicted solar
+                        solcast_tomorrow = config_data.get(CONF_SOLCAST_TOMORROW)
+                        solcast_tomorrow_value = (
+                            self._get_sensor_value(solcast_tomorrow)
+                            if solcast_tomorrow
+                            else None
+                        )
+                        if solcast_tomorrow_value and solcast_tomorrow_value > 0:
+                            discharge_plan_tomorrow = self._generate_tomorrow_plan(
+                                periods,
+                                solcast_tomorrow_value,
+                                discharge_power_kw,
+                                export_window_start,
+                                export_window_end,
+                            )
+                            _LOGGER.debug(
+                                "Generated tomorrow's CI discharge plan: %d periods, %.3f kWh total",
+                                len(discharge_plan_tomorrow),
+                                sum(p.get("energy_kwh", 0) for p in discharge_plan_tomorrow),
+                            )
+
+            # Generate charge plan for next charge session if charge planning is enabled
+            next_charge_session = []
+            enable_charge_planning = config_data.get(CONF_ENABLE_CHARGE_PLANNING, False)
             
-            if ci_data:
-                periods = ci_data.get("periods", [])
-                if periods:
-                    charge_power_kw = config_data.get(CONF_CHARGE_POWER_KW, DEFAULT_CHARGE_POWER_KW)
-                    charge_window_start = config_data.get(CONF_CHARGE_WINDOW_START, DEFAULT_CHARGE_WINDOW_START)
-                    charge_window_end = config_data.get(CONF_CHARGE_WINDOW_END, DEFAULT_CHARGE_WINDOW_END)
-                    battery_capacity_kwh = config_data.get(CONF_BATTERY_CAPACITY_KWH, DEFAULT_BATTERY_CAPACITY_KWH)
-                    
-                    # Generate charge plan for next charge session
-                    next_charge_session = self._generate_next_charge_session(
-                        periods,
-                        current_soc,
-                        charge_power_kw,
-                        charge_window_start,
-                        charge_window_end,
-                        battery_capacity_kwh,
-                    )
-                    _LOGGER.debug(
-                        "Generated next charge session plan: %d periods, %.3f kWh total",
-                        len(next_charge_session),
-                        sum(p.get("energy_kwh", 0) for p in next_charge_session),
-                    )
+            # Fetch CI data for charge planning if needed
+            if enable_charge_planning and current_soc is not None:
+                ci_data = None
+                ci_sensor = config_data.get(CONF_CI_FORECAST_SENSOR)
+                if ci_sensor:
+                    ci_state = self.hass.states.get(ci_sensor)
+                    if ci_state:
+                        state_str = None
+                        if ci_state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+                            state_str = ci_state.state
+                        ci_data = self._parse_ci_forecast(state_str, ci_state.attributes)
+                
+                if ci_data:
+                    periods = ci_data.get("periods", [])
+                    if periods:
+                        charge_power_kw = config_data.get(CONF_CHARGE_POWER_KW, DEFAULT_CHARGE_POWER_KW)
+                        charge_window_start = config_data.get(CONF_CHARGE_WINDOW_START, DEFAULT_CHARGE_WINDOW_START)
+                        charge_window_end = config_data.get(CONF_CHARGE_WINDOW_END, DEFAULT_CHARGE_WINDOW_END)
+                        battery_capacity_kwh = config_data.get(CONF_BATTERY_CAPACITY_KWH, DEFAULT_BATTERY_CAPACITY_KWH)
+                        
+                        # Generate charge plan for next charge session
+                        next_charge_session = self._generate_next_charge_session(
+                            periods,
+                            current_soc,
+                            charge_power_kw,
+                            charge_window_start,
+                            charge_window_end,
+                            battery_capacity_kwh,
+                        )
+                        _LOGGER.debug(
+                            "Generated next charge session plan: %d periods, %.3f kWh total",
+                            len(next_charge_session),
+                            sum(p.get("energy_kwh", 0) for p in next_charge_session),
+                        )
 
-        # Check for auto-discharge trigger
-        enable_auto_discharge = config_data.get(CONF_ENABLE_AUTO_DISCHARGE, False)
-        if enable_auto_discharge and discharge_plan_today:
-            await self._check_and_trigger_auto_discharge(
-                discharge_plan_today,
-                current_soc,
-                solcast_total_today,
-                target_export_kwh,
-                min_soc,
-                safety_margin,
-                discharge_power_kw,
-            )
+            # Check for auto-discharge trigger
+            enable_auto_discharge = config_data.get(CONF_ENABLE_AUTO_DISCHARGE, False)
+            if enable_auto_discharge and discharge_plan_today:
+                await self._check_and_trigger_auto_discharge(
+                    discharge_plan_today,
+                    current_soc,
+                    solcast_total_today,
+                    target_export_kwh,
+                    min_soc,
+                    safety_margin,
+                    discharge_power_kw,
+                )
 
-        return {
-            ATTR_EXPORT_HEADROOM: headroom_kwh,
-            ATTR_EXPORT_ALLOWED: export_cap_kwh,
-            ATTR_EXPORTED_TODAY: grid_feed_today,
-            ATTR_DISCHARGE_NEEDED: recommended_discharge_w,
-            ATTR_CURRENT_PV: pv_energy_today,
-            ATTR_FORECAST_PV: solcast_total_today,
-            ATTR_LAST_CALCULATION: self.hass.states.get("sensor.date_time_iso").state
-            if self.hass.states.get("sensor.date_time_iso")
-            else None,
-            ATTR_DISCHARGE_PLAN: discharge_plan_today,  # Keep backward compatibility
-            ATTR_DISCHARGE_PLAN_TODAY: discharge_plan_today,
-            ATTR_DISCHARGE_PLAN_TOMORROW: discharge_plan_tomorrow,
-            "next_charge_session": next_charge_session,
-            ATTR_CURRENT_CI_VALUE: current_ci_value,
-            ATTR_CURRENT_CI_INDEX: current_ci_index,
-            "reserve_limit_reached": reserve_limit_reached,
-            "observe_reserve_soc": observe_reserve_soc,
-            "current_soc": current_soc,
-            "min_soc": min_soc,
-            "reserve_soc_target": reserve_soc_target,
-        }
+            # Record successful update
+            self._stale_data_detector.record_update()
+            self._circuit_breaker.record_success()
+
+            return {
+                ATTR_EXPORT_HEADROOM: headroom_kwh,
+                ATTR_EXPORT_ALLOWED: export_cap_kwh,
+                ATTR_EXPORTED_TODAY: grid_feed_today,
+                ATTR_DISCHARGE_NEEDED: recommended_discharge_w,
+                ATTR_CURRENT_PV: pv_energy_today,
+                ATTR_FORECAST_PV: solcast_total_today,
+                ATTR_LAST_CALCULATION: self.hass.states.get("sensor.date_time_iso").state
+                if self.hass.states.get("sensor.date_time_iso")
+                else None,
+                ATTR_DISCHARGE_PLAN: discharge_plan_today,  # Keep backward compatibility
+                ATTR_DISCHARGE_PLAN_TODAY: discharge_plan_today,
+                ATTR_DISCHARGE_PLAN_TOMORROW: discharge_plan_tomorrow,
+                "next_charge_session": next_charge_session,
+                ATTR_CURRENT_CI_VALUE: current_ci_value,
+                ATTR_CURRENT_CI_INDEX: current_ci_index,
+                "reserve_limit_reached": reserve_limit_reached,
+                "observe_reserve_soc": observe_reserve_soc,
+                "current_soc": current_soc,
+                "min_soc": min_soc,
+                "reserve_soc_target": reserve_soc_target,
+            }
+        except UpdateFailed:
+            # Re-raise UpdateFailed to let coordinator handle it
+            raise
+        except Exception as err:
+            # Log and track unexpected errors
+            _LOGGER.error("Unexpected error in update: %s", err, exc_info=True)
+            self._circuit_breaker.record_failure()
+            raise UpdateFailed(f"Update failed with error: {err}") from err
 
     @property
     def discharge_active(self) -> bool:
@@ -1230,6 +1264,40 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
             self._discharge_target_energy = None
             self._discharge_start_time = None
             _LOGGER.info("Discharge stopped")
+
+    def set_error_state(self, error: str) -> None:
+        """Set error state for monitoring."""
+        self._error_state = error
+        _LOGGER.error("System error state: %s", error)
+        self._circuit_breaker.record_failure()
+
+    def clear_error_state(self) -> None:
+        """Clear error state."""
+        if self._error_state:
+            _LOGGER.info("Clearing error state: %s", self._error_state)
+        self._error_state = None
+        self._circuit_breaker.record_success()
+
+    def get_error_state(self) -> str | None:
+        """Get current error state."""
+        return self._error_state
+
+    def is_data_stale(self) -> bool:
+        """Check if coordinator data is stale."""
+        return self._stale_data_detector.is_stale()
+
+    def get_data_age(self) -> float | None:
+        """Get age of coordinator data in seconds."""
+        return self._stale_data_detector.get_age_seconds()
+
+    def get_system_health(self) -> dict[str, Any]:
+        """Get system health status."""
+        return {
+            "error_state": self._error_state,
+            "circuit_breaker": self._circuit_breaker.get_status(),
+            "data_staleness": self._stale_data_detector.get_status(),
+            "discharge_active": self._discharge_active,
+        }
 
     async def _check_and_trigger_auto_discharge(
         self,
