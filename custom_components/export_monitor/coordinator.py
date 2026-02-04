@@ -74,6 +74,7 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
         self._discharge_target_energy = None  # Energy to discharge (kWh)
         self._discharge_start_time = None  # When discharge started
         self._calculated_duration = None  # Calculated discharge duration (minutes)
+        self._last_auto_discharge_window = None  # Track which window was last auto-discharged
 
     def _get_sensor_value(self, entity_id: str) -> float | None:
         """Get sensor value as float."""
@@ -679,6 +680,19 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                             sum(p.get("energy_kwh", 0) for p in discharge_plan_tomorrow),
                         )
 
+        # Check for auto-discharge trigger
+        enable_auto_discharge = config_data.get(CONF_ENABLE_AUTO_DISCHARGE, False)
+        if enable_auto_discharge and discharge_plan_today:
+            await self._check_and_trigger_auto_discharge(
+                discharge_plan_today,
+                current_soc,
+                solcast_total_today,
+                target_export_kwh,
+                min_soc_percent,
+                safety_margin,
+                discharge_power_kw,
+            )
+
         return {
             ATTR_EXPORT_HEADROOM: headroom_kwh,
             ATTR_EXPORT_ALLOWED: export_cap_kwh,
@@ -728,3 +742,95 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
             self._discharge_start_time = None
             _LOGGER.info("Discharge stopped")
 
+    async def _check_and_trigger_auto_discharge(
+        self,
+        discharge_plan: list[dict],
+        current_soc: float,
+        solcast_total_today: float,
+        target_export_kwh: float,
+        min_soc_percent: float,
+        safety_margin: float,
+        discharge_power_kw: float,
+    ) -> None:
+        """Check if we should auto-trigger discharge and call service if needed.
+        
+        Args:
+            discharge_plan: List of discharge plan windows with start/end times
+            current_soc: Current battery state of charge (%)
+            solcast_total_today: Predicted solar for today (kWh)
+            target_export_kwh: Target energy to export (kWh)
+            min_soc_percent: Minimum SOC to maintain (%)
+            safety_margin: Safety margin in kWh
+            discharge_power_kw: Discharge power (kW)
+        """
+        import datetime
+        
+        if not discharge_plan or len(discharge_plan) == 0:
+            return
+        
+        now = datetime.datetime.now()
+        today_str = now.strftime("%Y-%m-%d")
+        
+        # Reset auto-discharge window tracking at midnight
+        if self._last_auto_discharge_window and today_str not in self._last_auto_discharge_window:
+            self._last_auto_discharge_window = None
+        
+        # Check each window in the plan
+        for window in discharge_plan:
+            window_start_str = window.get("period_start", "")
+            window_end_str = window.get("period_end", "")
+            window_energy = window.get("energy_kwh", 0)
+            
+            if not window_start_str:
+                continue
+            
+            try:
+                # Parse window start time
+                window_start = datetime.datetime.fromisoformat(window_start_str)
+                window_end = datetime.datetime.fromisoformat(window_end_str)
+                
+                # Create a window identifier for tracking
+                window_id = f"{today_str}_{window_start_str}"
+                
+                # Skip if we've already triggered this window today
+                if self._last_auto_discharge_window == window_id:
+                    continue
+                
+                # Check if we're within the window start +/- 5 minutes
+                time_until_start = (window_start - now).total_seconds() / 60
+                
+                # Trigger if we're within 5 minutes before start or already in the window
+                if -5 <= time_until_start <= 0 and not self._discharge_active:
+                    _LOGGER.info(
+                        "Auto-discharge triggered for window %s - %s (%.3f kWh)",
+                        window_start.strftime("%H:%M"),
+                        window_end.strftime("%H:%M"),
+                        window_energy,
+                    )
+                    
+                    # Track this window as triggered
+                    self._last_auto_discharge_window = window_id
+                    
+                    # Mark discharge as active
+                    self.set_discharge_active(
+                        True,
+                        grid_export=0.0,  # Will be updated by button
+                        target_energy=window_energy,
+                    )
+                    
+                    # Call the discharge service
+                    try:
+                        await self.hass.services.async_call(
+                            DOMAIN,
+                            SERVICE_START_DISCHARGE,
+                        )
+                        _LOGGER.info("Auto-discharge service call executed")
+                    except Exception as err:
+                        _LOGGER.error("Failed to call discharge service: %s", err)
+                        self.set_discharge_active(False)
+                    
+                    break  # Only trigger one window per update
+            
+            except (ValueError, TypeError) as err:
+                _LOGGER.debug("Error parsing window times: %s", err)
+                continue
