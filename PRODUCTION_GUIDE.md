@@ -568,7 +568,7 @@ IDLE → DISCHARGE_NEEDED → DISCHARGE_ACTIVE → DISCHARGE_COMPLETE → IDLE
 
 ## Version History
 
-**v1.9.0** - Production Readiness Update
+**v1.10.0** - Production Readiness Update
 - Added comprehensive error handling
 - Implemented sensor validation
 - Added circuit breaker pattern

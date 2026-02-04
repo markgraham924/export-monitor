@@ -733,7 +733,7 @@ class SystemHealthSensor(ExportMonitorSensor):
             return "Error"
         if self.coordinator.is_data_stale():
             return "Stale Data"
-        if not self.coordinator._circuit_breaker.can_attempt():
+        if self.coordinator.is_circuit_breaker_open():
             return "Circuit Breaker Open"
         return "Healthy"
 
@@ -841,6 +841,6 @@ class CircuitBreakerStatusSensor(ExportMonitorSensor):
         return {
             "failure_count": cb_status.get("failure_count"),
             "last_failure_time": cb_status.get("last_failure_time"),
-            "can_attempt": self.coordinator._circuit_breaker.can_attempt(),
+            "can_attempt": self.coordinator.can_attempt_operation(),
         }
 

@@ -1130,7 +1130,7 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                         # Generate plan for tomorrow using predicted solar
                         solcast_tomorrow = config_data.get(CONF_SOLCAST_TOMORROW)
                         solcast_tomorrow_value = (
-                            self._get_sensor_value(solcast_tomorrow)
+                            self._get_sensor_value(solcast_tomorrow, "energy")
                             if solcast_tomorrow
                             else None
                         )
@@ -1289,6 +1289,14 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
     def get_data_age(self) -> float | None:
         """Get age of coordinator data in seconds."""
         return self._stale_data_detector.get_age_seconds()
+
+    def can_attempt_operation(self) -> bool:
+        """Check if circuit breaker allows operations."""
+        return self._circuit_breaker.can_attempt()
+
+    def is_circuit_breaker_open(self) -> bool:
+        """Check if circuit breaker is open."""
+        return self._circuit_breaker.is_open
 
     def get_system_health(self) -> dict[str, Any]:
         """Get system health status."""
