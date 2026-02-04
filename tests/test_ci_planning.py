@@ -5,40 +5,43 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 
-# Mock CI data for testing
+# Mock CI data for testing - using relative dates to ensure tests pass as time advances
+now = datetime.now(timezone.utc)
+tomorrow = now + timedelta(days=1)
+
 MOCK_CI_DATA = {
     "regionid": 3,
     "shortname": "Test Region",
     "data": {
         "data": [
             {
-                "from": "2026-02-03T20:00Z",
-                "to": "2026-02-03T20:30Z",
+                "from": (now + timedelta(hours=1)).strftime("%Y-%m-%dT%H:00Z"),
+                "to": (now + timedelta(hours=1, minutes=30)).strftime("%Y-%m-%dT%H:30Z"),
                 "intensity": {"forecast": 25, "index": "low"},
             },
             {
-                "from": "2026-02-03T20:30Z",
-                "to": "2026-02-03T21:00Z",
+                "from": (now + timedelta(hours=2)).strftime("%Y-%m-%dT%H:00Z"),
+                "to": (now + timedelta(hours=2, minutes=30)).strftime("%Y-%m-%dT%H:30Z"),
                 "intensity": {"forecast": 41, "index": "low"},
             },
             {
-                "from": "2026-02-03T21:00Z",
-                "to": "2026-02-03T21:30Z",
+                "from": (now + timedelta(hours=3)).strftime("%Y-%m-%dT%H:00Z"),
+                "to": (now + timedelta(hours=3, minutes=30)).strftime("%Y-%m-%dT%H:30Z"),
                 "intensity": {"forecast": 39, "index": "low"},
             },
             {
-                "from": "2026-02-03T21:30Z",
-                "to": "2026-02-03T22:00Z",
+                "from": (now + timedelta(hours=4)).strftime("%Y-%m-%dT%H:00Z"),
+                "to": (now + timedelta(hours=4, minutes=30)).strftime("%Y-%m-%dT%H:30Z"),
                 "intensity": {"forecast": 15, "index": "very low"},
             },
             {
-                "from": "2026-02-03T22:30Z",
-                "to": "2026-02-03T23:00Z",
+                "from": (now + timedelta(hours=5)).strftime("%Y-%m-%dT%H:00Z"),
+                "to": (now + timedelta(hours=5, minutes=30)).strftime("%Y-%m-%dT%H:30Z"),
                 "intensity": {"forecast": 41, "index": "low"},
             },
             {
-                "from": "2026-02-03T23:30Z",
-                "to": "2026-02-04T00:00Z",
+                "from": (now + timedelta(hours=6)).strftime("%Y-%m-%dT%H:00Z"),
+                "to": (now + timedelta(hours=6, minutes=30)).strftime("%Y-%m-%dT%H:30Z"),
                 "intensity": {"forecast": 12, "index": "very low"},
             },
         ]

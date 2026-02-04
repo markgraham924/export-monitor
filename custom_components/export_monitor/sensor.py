@@ -11,7 +11,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfEnergy, UnitOfPower
+from homeassistant.const import UnitOfEnergy, UnitOfPower, PERCENTAGE, EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -44,23 +44,44 @@ async def async_setup_entry(
     """Set up sensor entities."""
     coordinator: ExportMonitorCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    async_add_entities(
-        [
-            ExportHeadroomSensor(coordinator, entry),
-            DischargeNeededSensor(coordinator, entry),
-            ExportedTodaySensor(coordinator, entry),
-            DischargeStatusSensor(coordinator, entry),
-            CalculatedDurationSensor(coordinator, entry),
-            DischargeCompleteSensor(coordinator, entry),
-            ReserveSOCTargetSensor(coordinator, entry),
-            ReserveSOCStatusSensor(coordinator, entry),
-            CurrentCIValueSensor(coordinator, entry),
-            CurrentCIIndexSensor(coordinator, entry),
-            DischargePlanSensor(coordinator, entry),
-            DischargePlanTodaySensor(coordinator, entry),
-            DischargePlanTomorrowSensor(coordinator, entry),
-        ]
-    )
+    sensors = [
+        ExportHeadroomSensor(coordinator, entry),
+        DischargeNeededSensor(coordinator, entry),
+        ExportedTodaySensor(coordinator, entry),
+        DischargeStatusSensor(coordinator, entry),
+        CalculatedDurationSensor(coordinator, entry),
+        DischargeCompleteSensor(coordinator, entry),
+        ReserveSOCTargetSensor(coordinator, entry),
+        ReserveSOCStatusSensor(coordinator, entry),
+        CurrentCIValueSensor(coordinator, entry),
+        CurrentCIIndexSensor(coordinator, entry),
+        DischargePlanSensor(coordinator, entry),
+        DischargePlanTodaySensor(coordinator, entry),
+        DischargePlanTomorrowSensor(coordinator, entry),
+    ]
+
+    # Diagnostic Sensors
+    diagnostics = [
+        GenericDiagnosticSensor(coordinator, entry, ATTR_CURRENT_PV, "Current PV", "mdi:solar-power", UnitOfPower.WATT, SensorDeviceClass.POWER),
+        GenericDiagnosticSensor(coordinator, entry, ATTR_FORECAST_PV, "Forecast PV Today", "mdi:solar-power-variant", UnitOfEnergy.KILO_WATT_HOUR, SensorDeviceClass.ENERGY),
+        GenericDiagnosticSensor(coordinator, entry, ATTR_EXPORT_ALLOWED, "Export Allowed", "mdi:export-variant"),
+        GenericDiagnosticSensor(coordinator, entry, "current_soc", "Current SOC", "mdi:battery", PERCENTAGE, SensorDeviceClass.BATTERY),
+        GenericDiagnosticSensor(coordinator, entry, "min_soc", "Minimum SOC", "mdi:battery-arrow-down", PERCENTAGE, SensorDeviceClass.BATTERY),
+        GenericDiagnosticSensor(coordinator, entry, "observe_reserve_soc", "Observe Reserve SOC", "mdi:shield-search"),
+        GenericDiagnosticSensor(coordinator, entry, "reserve_limit_reached", "Reserve Limit Reached", "mdi:shield-alert"),
+    ]
+
+    # Plan Detail Sensors
+    plan_details = [
+        PlanEnergySensor(coordinator, entry, ATTR_DISCHARGE_PLAN, "Total Plan Energy"),
+        PlanEnergySensor(coordinator, entry, ATTR_DISCHARGE_PLAN_TODAY, "Plan Energy Today"),
+        PlanEnergySensor(coordinator, entry, ATTR_DISCHARGE_PLAN_TOMORROW, "Plan Energy Tomorrow"),
+        PlanWindowSensor(coordinator, entry, ATTR_DISCHARGE_PLAN, "Plan Windows Total"),
+        PlanWindowSensor(coordinator, entry, ATTR_DISCHARGE_PLAN_TODAY, "Plan Windows Today"),
+        PlanWindowSensor(coordinator, entry, ATTR_DISCHARGE_PLAN_TOMORROW, "Plan Windows Tomorrow"),
+    ]
+
+    async_add_entities(sensors + diagnostics + plan_details)
 
 
 class ExportMonitorSensor(CoordinatorEntity, SensorEntity):
@@ -94,6 +115,7 @@ class ExportMonitorSensor(CoordinatorEntity, SensorEntity):
 class ExportHeadroomSensor(ExportMonitorSensor):
     """Sensor showing remaining export headroom (kWh)."""
 
+    _attr_device_class = SensorDeviceClass.ENERGY
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_state_class = SensorStateClass.MEASUREMENT
 
@@ -117,18 +139,6 @@ class ExportHeadroomSensor(ExportMonitorSensor):
         if self.coordinator.data:
             return self.coordinator.data.get(ATTR_EXPORT_HEADROOM)
         return None
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return additional attributes."""
-        if not self.coordinator.data:
-            return {}
-
-        return {
-            ATTR_CURRENT_PV: self.coordinator.data.get(ATTR_CURRENT_PV),
-            ATTR_FORECAST_PV: self.coordinator.data.get(ATTR_FORECAST_PV),
-            ATTR_EXPORT_ALLOWED: self.coordinator.data.get(ATTR_EXPORT_ALLOWED),
-        }
 
 
 class DischargeNeededSensor(ExportMonitorSensor):
@@ -158,17 +168,6 @@ class DischargeNeededSensor(ExportMonitorSensor):
         if self.coordinator.data:
             return self.coordinator.data.get(ATTR_DISCHARGE_NEEDED)
         return None
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return additional attributes."""
-        if not self.coordinator.data:
-            return {}
-
-        return {
-            "current_soc": self.coordinator.data.get("current_soc"),
-            "min_soc": self.coordinator.data.get("min_soc"),
-        }
 
 
 class ExportedTodaySensor(ExportMonitorSensor):
@@ -229,17 +228,6 @@ class DischargeStatusSensor(ExportMonitorSensor):
                 return "Needed"
         
         return "Idle"
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return additional attributes."""
-        if not self.coordinator.data:
-            return {}
-
-        return {
-            ATTR_EXPORT_HEADROOM: self.coordinator.data.get(ATTR_EXPORT_HEADROOM),
-            ATTR_EXPORT_ALLOWED: self.coordinator.data.get(ATTR_EXPORT_ALLOWED),
-        }
 
 
 class CalculatedDurationSensor(ExportMonitorSensor):
@@ -367,19 +355,6 @@ class ReserveSOCStatusSensor(ExportMonitorSensor):
         else:
             return "Normal"
 
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return additional attributes."""
-        if not self.coordinator.data:
-            return {}
-
-        return {
-            "reserve_soc_target": self.coordinator.data.get("reserve_soc_target"),
-            "current_soc": self.coordinator.data.get("current_soc"),
-            "observe_reserve_soc": self.coordinator.data.get("observe_reserve_soc"),
-            "reserve_limit_reached": self.coordinator.data.get("reserve_limit_reached"),
-        }
-
 
 class CurrentCIValueSensor(ExportMonitorSensor):
     """Sensor showing current Carbon Intensity value (gCO2/kWh)."""
@@ -404,16 +379,6 @@ class CurrentCIValueSensor(ExportMonitorSensor):
         if not self.coordinator.data:
             return None
         return self.coordinator.data.get(ATTR_CURRENT_CI_VALUE)
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return additional attributes."""
-        if not self.coordinator.data:
-            return {}
-
-        return {
-            "ci_index": self.coordinator.data.get(ATTR_CURRENT_CI_INDEX),
-        }
 
 
 class CurrentCIIndexSensor(ExportMonitorSensor):
@@ -442,7 +407,7 @@ class CurrentCIIndexSensor(ExportMonitorSensor):
 
 
 class DischargePlanSensor(ExportMonitorSensor):
-    """Sensor showing optimized discharge plan for highest CI periods."""
+    """Sensor showing optimized discharge plan summary."""
 
     def __init__(
         self,
@@ -469,33 +434,11 @@ class DischargePlanSensor(ExportMonitorSensor):
             return "No plan"
 
         total_energy = sum(p.get("energy_kwh", 0) for p in plan)
-        avg_ci = (
-            sum(p.get("ci_value", 0) * p.get("energy_kwh", 0) for p in plan) / total_energy
-            if total_energy > 0
-            else 0
-        )
-
-        return f"{len(plan)} windows, {total_energy:.2f} kWh, avg CI {avg_ci:.0f}"
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return detailed plan."""
-        if not self.coordinator.data:
-            return {}
-
-        plan = self.coordinator.data.get(ATTR_DISCHARGE_PLAN, [])
-        if not plan:
-            return {"plan": []}
-
-        return {
-            "plan": plan,
-            "total_energy_kwh": sum(p.get("energy_kwh", 0) for p in plan),
-            "windows": len(plan),
-        }
+        return f"{len(plan)} windows, {total_energy:.2f} kWh"
 
 
 class DischargePlanTodaySensor(ExportMonitorSensor):
-    """Sensor showing discharge plan for today (remaining hours until midnight)."""
+    """Sensor showing discharge plan for today summary."""
 
     def __init__(
         self,
@@ -504,51 +447,22 @@ class DischargePlanTodaySensor(ExportMonitorSensor):
     ) -> None:
         """Initialize the discharge plan today sensor."""
         super().__init__(
-            coordinator,
-            entry,
-            "discharge_plan_today",
-            "Discharge Plan Today",
-            "mdi:battery-charging-outline",
+            coordinator, entry, "discharge_plan_today", "Discharge Plan Today", "mdi:battery-charging-outline"
         )
 
     @property
     def native_value(self) -> str:
-        """Return plan summary."""
         if not self.coordinator.data:
             return "No plan"
-
         plan = self.coordinator.data.get(ATTR_DISCHARGE_PLAN_TODAY, [])
         if not plan:
             return "No plan"
-
         total_energy = sum(p.get("energy_kwh", 0) for p in plan)
-        avg_ci = (
-            sum(p.get("ci_value", 0) * p.get("energy_kwh", 0) for p in plan) / total_energy
-            if total_energy > 0
-            else 0
-        )
-
-        return f"{len(plan)} windows, {total_energy:.2f} kWh, avg CI {avg_ci:.0f}"
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return detailed plan."""
-        if not self.coordinator.data:
-            return {}
-
-        plan = self.coordinator.data.get(ATTR_DISCHARGE_PLAN_TODAY, [])
-        if not plan:
-            return {"plan": []}
-
-        return {
-            "plan": plan,
-            "total_energy_kwh": sum(p.get("energy_kwh", 0) for p in plan),
-            "windows": len(plan),
-        }
+        return f"{len(plan)} windows, {total_energy:.2f} kWh"
 
 
 class DischargePlanTomorrowSensor(ExportMonitorSensor):
-    """Sensor showing discharge plan for tomorrow (full 24hrs using predicted solar)."""
+    """Sensor showing discharge plan for tomorrow summary."""
 
     def __init__(
         self,
@@ -557,45 +471,75 @@ class DischargePlanTomorrowSensor(ExportMonitorSensor):
     ) -> None:
         """Initialize the discharge plan tomorrow sensor."""
         super().__init__(
-            coordinator,
-            entry,
-            "discharge_plan_tomorrow",
-            "Discharge Plan Tomorrow",
-            "mdi:battery-charging-outline",
+            coordinator, entry, "discharge_plan_tomorrow", "Discharge Plan Tomorrow", "mdi:battery-charging-outline"
         )
 
     @property
     def native_value(self) -> str:
-        """Return plan summary."""
         if not self.coordinator.data:
             return "No plan"
-
         plan = self.coordinator.data.get(ATTR_DISCHARGE_PLAN_TOMORROW, [])
         if not plan:
             return "No plan"
-
         total_energy = sum(p.get("energy_kwh", 0) for p in plan)
-        avg_ci = (
-            sum(p.get("ci_value", 0) * p.get("energy_kwh", 0) for p in plan) / total_energy
-            if total_energy > 0
-            else 0
-        )
+        return f"{len(plan)} windows, {total_energy:.2f} kWh"
 
-        return f"{len(plan)} windows, {total_energy:.2f} kWh, avg CI {avg_ci:.0f}"
+
+class GenericDiagnosticSensor(ExportMonitorSensor):
+    """Generic diagnostic sensor for attributes."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: ExportMonitorCoordinator,
+        entry: ConfigEntry,
+        key: str,
+        name: str,
+        icon: str,
+        unit: str | None = None,
+        device_class: SensorDeviceClass | None = None,
+    ) -> None:
+        super().__init__(coordinator, entry, f"diag_{key}", name, icon)
+        self._data_key = key
+        self._attr_native_unit_of_measurement = unit
+        self._attr_device_class = device_class
 
     @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return detailed plan."""
-        if not self.coordinator.data:
-            return {}
+    def native_value(self) -> Any:
+        return self.coordinator.data.get(self._data_key) if self.coordinator.data else None
 
-        plan = self.coordinator.data.get(ATTR_DISCHARGE_PLAN_TOMORROW, [])
-        if not plan:
-            return {"plan": []}
 
-        return {
-            "plan": plan,
-            "total_energy_kwh": sum(p.get("energy_kwh", 0) for p in plan),
-            "windows": len(plan),
-        }
+class PlanEnergySensor(ExportMonitorSensor):
+    """Sensor for plan energy total."""
+
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator: ExportMonitorCoordinator, entry: ConfigEntry, plan_key: str, name: str) -> None:
+        super().__init__(coordinator, entry, f"{plan_key}_energy", name, "mdi:lightning-bolt")
+        self._plan_key = plan_key
+
+    @property
+    def native_value(self) -> float | None:
+        if not self.coordinator.data: return None
+        plan = self.coordinator.data.get(self._plan_key, [])
+        return sum(p.get("energy_kwh", 0) for p in plan)
+
+
+class PlanWindowSensor(ExportMonitorSensor):
+    """Sensor for number of plan windows."""
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator: ExportMonitorCoordinator, entry: ConfigEntry, plan_key: str, name: str) -> None:
+        super().__init__(coordinator, entry, f"{plan_key}_windows", name, "mdi:clock-list")
+        self._plan_key = plan_key
+
+    @property
+    def native_value(self) -> int | None:
+        if not self.coordinator.data: return None
+        plan = self.coordinator.data.get(self._plan_key, [])
+        return len(plan)
 

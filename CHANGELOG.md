@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-02-04
+
+### Added
+- **Diagnostic Sensor Section**: Moved battery SOC, solar forecast, and internal status flags to a dedicated Diagnostics section.
+- **Detailed Plan Sensors**: Created new sensor entities for plan energy and window counts (Today, Tomorrow, Total) to ensure visibility in modern Home Assistant UI.
+
+### Changed
+- **Removed Attributes**: Eliminated `extra_state_attributes` from primary sensors, replacing them with discrete sensor entities for better data accessibility.
+
 ## [1.4.1] - 2026-02-04
 
 ### Fixed
