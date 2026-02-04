@@ -320,7 +320,6 @@ class ExportMonitorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(
                         domain="sensor",
-                        device_class="energy",
                     )
                 ),
                 vol.Optional(
@@ -329,9 +328,68 @@ class ExportMonitorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(
                         domain="sensor",
-                        device_class="energy",
                     )
                 ),
+                vol.Optional(
+                    CONF_TARGET_EXPORT,
+                    default=current_data.get(CONF_TARGET_EXPORT, DEFAULT_TARGET_EXPORT),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=10000,
+                        step=100,
+                        unit_of_measurement="W",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_MIN_SOC,
+                    default=current_data.get(CONF_MIN_SOC, DEFAULT_MIN_SOC),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=100,
+                        step=1,
+                        unit_of_measurement="%",
+                        mode=selector.NumberSelectorMode.SLIDER,
+                    )
+                ),
+                vol.Optional(
+                    CONF_SAFETY_MARGIN,
+                    default=current_data.get(CONF_SAFETY_MARGIN, DEFAULT_SAFETY_MARGIN),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=20,
+                        step=0.1,
+                        unit_of_measurement="kWh",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Optional(
+                    CONF_RESERVE_SOC_SENSOR,
+                    default=current_data.get(CONF_RESERVE_SOC_SENSOR),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain="sensor",
+                    )
+                ),
+                vol.Optional(
+                    CONF_OBSERVE_RESERVE_SOC,
+                    default=current_data.get(CONF_OBSERVE_RESERVE_SOC, DEFAULT_OBSERVE_RESERVE_SOC),
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_CI_FORECAST_SENSOR,
+                    default=current_data.get(CONF_CI_FORECAST_SENSOR),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain="sensor",
+                    )
+                ),
+                vol.Optional(
+                    CONF_ENABLE_CI_PLANNING,
+                    default=current_data.get(CONF_ENABLE_CI_PLANNING, DEFAULT_ENABLE_CI_PLANNING),
+                ): selector.BooleanSelector(),
             }
         )
 
