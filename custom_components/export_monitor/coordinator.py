@@ -34,6 +34,7 @@ from .const import (
     CONF_CURRENT_SOC,
     CONF_DISCHARGE_CUTOFF_SOC,
     CONF_ENABLE_AUTO_DISCHARGE,
+    CONF_ENABLE_AUTO_CHARGE,
     CONF_ENABLE_CHARGE_PLANNING,
     CONF_ENABLE_CI_PLANNING,
     CONF_EXPORT_WINDOW_START,
@@ -89,6 +90,9 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
         self._discharge_start_time = None  # When discharge started
         self._calculated_duration = None  # Calculated discharge duration (minutes)
         self._last_auto_discharge_window = None  # Track which window was last auto-discharged
+        self._charge_active = False  # Track if charging is active
+        self._charge_start_time = None  # When charge started
+        self._last_auto_charge_window = None  # Track which window was last auto-charged
 
     def _get_sensor_value(self, entity_id: str) -> float | None:
         """Get sensor value as float."""
@@ -1178,6 +1182,13 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                 discharge_power_kw,
             )
 
+        # Check for auto-charge trigger
+        enable_auto_charge = config_data.get(CONF_ENABLE_AUTO_CHARGE, False)
+        if enable_auto_charge and next_charge_session:
+            await self._check_and_trigger_auto_charge(
+                next_charge_session,
+            )
+
         return {
             ATTR_EXPORT_HEADROOM: headroom_kwh,
             ATTR_EXPORT_ALLOWED: export_cap_kwh,
@@ -1229,7 +1240,26 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
             self._discharge_start_export = None
             self._discharge_target_energy = None
             self._discharge_start_time = None
-            _LOGGER.info("Discharge stopped")
+
+    @property
+    def charge_active(self) -> bool:
+        """Return if charge is currently active."""
+        return self._charge_active
+
+    def set_charge_active(self, active: bool) -> None:
+        """Set charge active state and tracking parameters.
+        
+        Args:
+            active: Whether charge is active
+        """
+        self._charge_active = active
+        if active:
+            from datetime import datetime, timezone
+            self._charge_start_time = datetime.now(timezone.utc)
+            _LOGGER.info("Charge started at %s", self._charge_start_time)
+        else:
+            self._charge_start_time = None
+            _LOGGER.info("Charge stopped")
 
     async def _check_and_trigger_auto_discharge(
         self,
@@ -1322,4 +1352,88 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
             
             except (ValueError, TypeError) as err:
                 _LOGGER.debug("Error parsing window times: %s", err)
+                continue
+
+    async def _check_and_trigger_auto_charge(
+        self,
+        charge_session: list[dict],
+    ) -> None:
+        """Check if we should auto-trigger charge and call service if needed.
+        
+        Args:
+            charge_session: Next charge session plan with start/end times and energy
+        """
+        from datetime import datetime, timezone
+        
+        if not charge_session or len(charge_session) == 0:
+            return
+        
+        now = datetime.now(timezone.utc)
+        
+        # Sort windows chronologically by start time
+        sorted_windows = sorted(
+            charge_session,
+            key=lambda w: datetime.fromisoformat(w.get("period_start", "9999-12-31T23:59:59+00:00"))
+        )
+        
+        # Check each window in chronological order
+        for window in sorted_windows:
+            window_start_str = window.get("period_start", "")
+            window_end_str = window.get("period_end", "")
+            window_energy = window.get("energy_kwh", 0)
+            
+            if not window_start_str:
+                continue
+            
+            try:
+                # Parse window start time (timezone-aware)
+                window_start = datetime.fromisoformat(window_start_str)
+                window_end = datetime.fromisoformat(window_end_str)
+                
+                # Create a window identifier using the window's own date
+                window_date_str = window_start.strftime("%Y-%m-%d")
+                window_id = f"{window_date_str}_{window_start_str}"
+                
+                # Skip if we've already triggered this window
+                if self._last_auto_charge_window == window_id:
+                    continue
+                
+                # Reset tracking at midnight
+                current_date_str = now.strftime("%Y-%m-%d")
+                if self._last_auto_charge_window and current_date_str not in self._last_auto_charge_window:
+                    self._last_auto_charge_window = None
+                
+                # Check how many minutes remain until the window starts
+                time_until_start = (window_start - now).total_seconds() / 60
+                
+                # Trigger if we're within 5 minutes before the window start
+                if 0 <= time_until_start <= 5 and not self._charge_active:
+                    _LOGGER.info(
+                        "Auto-charge triggered for window %s - %s (%.3f kWh)",
+                        window_start.strftime("%H:%M"),
+                        window_end.strftime("%H:%M"),
+                        window_energy,
+                    )
+                    
+                    # Track this window as triggered
+                    self._last_auto_charge_window = window_id
+                    
+                    # Mark charge as active
+                    self.set_charge_active(True)
+                    
+                    # Call the charge service
+                    try:
+                        await self.hass.services.async_call(
+                            DOMAIN,
+                            "start_charge",
+                        )
+                        _LOGGER.info("Auto-charge service call executed")
+                    except Exception as err:
+                        _LOGGER.error("Failed to call charge service: %s", err)
+                        self.set_charge_active(False)
+                    
+                    break  # Only trigger one window per update
+            
+            except (ValueError, TypeError) as err:
+                _LOGGER.debug("Error parsing charge window times: %s", err)
                 continue

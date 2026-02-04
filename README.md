@@ -42,10 +42,18 @@ Before installing this integration, you must have:
 2. **Alpha ESS System** with [Hillview Lodge Alpha ESS integration](https://projects.hillviewlodge.ie/alphaess/) configured
 3. **Solcast PV Forecast** integration installed from HACS
 4. **Alpha ESS Helper Entities** configured:
+   
+   **Discharge Control:**
    - `input_boolean.alphaess_helper_force_discharging`
    - `number.alphaess_template_force_discharging_power`
    - `input_number.alphaess_helper_force_discharging_cutoff_soc` (or number entity equivalent)
    - `input_number.alphaess_helper_force_discharging_duration` (optional, for duration control)
+   
+   **Charge Control:**
+   - `input_boolean.alphaess_helper_force_charging`
+   - `number.alphaess_template_force_charging_power`
+   - `input_number.alphaess_helper_force_charging_cutoff_soc`
+   - `input_number.alphaess_helper_force_charging_duration`
 
 ### Setting Up Alpha ESS Helper Entities
 
@@ -57,6 +65,10 @@ input_boolean:
   alphaess_helper_force_discharging:
     name: Alpha ESS Force Discharging
     icon: mdi:battery-arrow-up
+  
+  alphaess_helper_force_charging:
+    name: Alpha ESS Force Charging
+    icon: mdi:battery-charging
 
 input_number:
   alphaess_template_force_discharging_power:
@@ -68,7 +80,7 @@ input_number:
     icon: mdi:flash
     
   alphaess_helper_force_discharging_cutoff_soc:
-    name: Alpha ESS Cutoff SOC
+    name: Alpha ESS Discharge Cutoff SOC
     min: 0
     max: 100
     step: 1
@@ -77,6 +89,30 @@ input_number:
     
   alphaess_helper_force_discharging_duration:
     name: Alpha ESS Discharge Duration
+    min: 1
+    max: 1440
+    step: 1
+    unit_of_measurement: min
+    icon: mdi:timer
+  
+  alphaess_template_force_charging_power:
+    name: Alpha ESS Charge Power
+    min: 0
+    max: 10
+    step: 0.1
+    unit_of_measurement: kW
+    icon: mdi:flash
+  
+  alphaess_helper_force_charging_cutoff_soc:
+    name: Alpha ESS Charge Cutoff SOC
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    icon: mdi:battery-charging-100
+  
+  alphaess_helper_force_charging_duration:
+    name: Alpha ESS Charge Duration
     min: 1
     max: 1440
     step: 1
@@ -114,10 +150,18 @@ input_number:
 3. Search for "Energy Export Monitor"
 4. Follow the setup wizard:
 
-  **Required Entities:**
+  **Required Discharge Control Entities:**
   - **Alpha ESS Discharge Button**: Select `input_boolean.alphaess_helper_force_discharging`
   - **Alpha ESS Discharge Power Capacity**: Select `number.alphaess_template_force_discharging_power` (set to your max discharge capacity in kW)
-  - **Alpha ESS Cutoff SOC**: Select `input_number.alphaess_helper_force_discharging_cutoff_soc`
+  - **Alpha ESS Discharge Cutoff SOC**: Select `input_number.alphaess_helper_force_discharging_cutoff_soc`
+
+  **Required Charge Control Entities:**
+  - **Alpha ESS Charge Button**: Select `input_boolean.alphaess_helper_force_charging`
+  - **Alpha ESS Charge Power**: Select `number.alphaess_template_force_charging_power`
+  - **Alpha ESS Charge Duration**: Select `input_number.alphaess_helper_force_charging_duration`
+  - **Alpha ESS Charge Cutoff SOC**: Select `input_number.alphaess_helper_force_charging_cutoff_soc`
+
+  **Required Sensor Entities:**
   - **Current Battery SOC**: Select your Alpha ESS SOC sensor (e.g., `sensor.alphaess_battery_soc`)
   - **Today's PV Energy (kWh)**: `sensor.alphaess_today_s_energy_from_pv`
   - **Today's Grid Feed (kWh)**: `sensor.alphaess_today_s_energy_feed_to_grid_meter`
@@ -131,6 +175,7 @@ input_number:
   - **Carbon Intensity Forecast Sensor**: Optional sensor for CI-based planning
   - **Enable CI Planning**: Toggle for carbon intensity discharge planning
   - **Enable Auto-Discharge**: Toggle for automatic discharge at planned windows
+  - **Enable Auto-Charge**: Toggle for automatic charge during low-CI windows
   - **Export Window Start/End**: Time constraints for discharge windows (default: 00:00 - 23:59)
   - **Enable Charge Planning**: Toggle for intelligent charge planning
   - **Charge Window Start/End**: Time constraints for charging windows (default: 00:00 - 06:00)
@@ -160,6 +205,7 @@ After setup, the integration creates the following entities:
 
 ### Switches
 - **Enable Auto-Discharge**: Toggle automatic discharge at planned export windows
+- **Enable Auto-Charge**: Toggle automatic charge during low-CI windows
 
 ### Numbers
 - **Target Export**: Set maximum grid export target (W)
@@ -211,9 +257,11 @@ Located in the **Diagnostic** entity category:
 
 ## Services
 
-The integration provides three services for automation:
+The integration provides services for both discharge and charge automation:
 
-### `export_monitor.start_discharge`
+### Discharge Services
+
+#### `export_monitor.start_discharge`
 
 Start battery discharge. Power and duration are calculated automatically based on configured discharge capacity and available export headroom.
 
@@ -228,7 +276,7 @@ service: export_monitor.start_discharge
 - Calculates duration: 1.5 kWh ÷ 3.0 kW × 60 = 30 minutes
 - Sets discharge power to 3.0 kW for 30 minutes
 
-### `export_monitor.stop_discharge`
+#### `export_monitor.stop_discharge`
 
 Stop battery discharge immediately.
 
@@ -236,12 +284,39 @@ Stop battery discharge immediately.
 service: export_monitor.stop_discharge
 ```
 
-### `export_monitor.calculate_discharge`
+#### `export_monitor.calculate_discharge`
 
 Recalculate discharge requirements based on current conditions.
 
 ```yaml
 service: export_monitor.calculate_discharge
+```
+
+### Charge Services
+
+#### `export_monitor.start_charge`
+
+Start battery charge during optimal low-CI periods. Power and duration are calculated automatically based on the next charge session plan. Always charges to 100% SOC.
+
+```yaml
+service: export_monitor.start_charge
+# No parameters required - uses next charge session plan
+```
+
+**How it works:**
+- Reads next charge session from charge planning
+- Calculates power and duration from the first charge window
+- Sets cutoff SOC to 100% (always charges to full)
+- Enables force charging to prevent battery discharge during charge window
+
+**Note:** When force charging is enabled, the battery will not discharge to the house, effectively preventing any grid draw during the charge window.
+
+#### `export_monitor.stop_charge`
+
+Stop battery charge immediately.
+
+```yaml
+service: export_monitor.stop_charge
 ```
 
 ## Automation Examples
@@ -304,6 +379,50 @@ automation:
           entity_id: number.export_monitor_safety_margin
         data:
           value: 500
+```
+
+### Enable Auto-Charge Based on Weather
+
+```yaml
+automation:
+  - alias: "Enable Auto-Charge on Cloudy Days"
+    trigger:
+      - platform: state
+        entity_id: weather.home
+        to: "cloudy"
+    condition:
+      - condition: time
+        after: "18:00:00"  # After solar production stops
+    action:
+      - service: switch.turn_on
+        target:
+          entity_id: switch.export_monitor_enable_auto_charge
+
+  - alias: "Disable Auto-Charge on Sunny Days"
+    trigger:
+      - platform: state
+        entity_id: weather.home
+        to: "sunny"
+    action:
+      - service: switch.turn_off
+        target:
+          entity_id: switch.export_monitor_enable_auto_charge
+```
+
+### Manual Charge Trigger
+
+```yaml
+automation:
+  - alias: "Manual Start Charge During Low Rate"
+    trigger:
+      - platform: time
+        at: "02:00:00"  # During cheap rate period
+    condition:
+      - condition: numeric_state
+        entity_id: sensor.alphaess_battery_soc
+        below: 30
+    action:
+      - service: export_monitor.start_charge
 ```
 
 ## Dashboard Card Examples

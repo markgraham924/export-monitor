@@ -13,7 +13,9 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     CONF_ENABLE_AUTO_DISCHARGE,
+    CONF_ENABLE_AUTO_CHARGE,
     DEFAULT_ENABLE_AUTO_DISCHARGE,
+    DEFAULT_ENABLE_AUTO_CHARGE,
     DOMAIN,
 )
 from .coordinator import ExportMonitorCoordinator
@@ -32,6 +34,7 @@ async def async_setup_entry(
     async_add_entities(
         [
             EnableAutoDischargeSwitch(coordinator, entry),
+            EnableAutoChargeSwitch(coordinator, entry),
         ]
     )
 
@@ -99,4 +102,22 @@ class EnableAutoDischargeSwitch(ExportMonitorSwitch):
             CONF_ENABLE_AUTO_DISCHARGE,
             "Enable Auto-Discharge",
             "mdi:battery-auto",
+        )
+
+
+class EnableAutoChargeSwitch(ExportMonitorSwitch):
+    """Switch to enable/disable auto-charge."""
+
+    def __init__(
+        self,
+        coordinator: ExportMonitorCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        """Initialize the auto-charge enable switch."""
+        super().__init__(
+            coordinator,
+            entry,
+            CONF_ENABLE_AUTO_CHARGE,
+            "Enable Auto-Charge",
+            "mdi:battery-charging-wireless",
         )
