@@ -13,11 +13,14 @@ A Home Assistant custom integration that intelligently controls Alpha ESS batter
 ## Features
 
 - **Smart Export Control**: Automatically calculates safe grid export limits based on PV production and forecasts
+- **Carbon Intensity Optimization**: Intelligent discharge planning during high-CI periods and charge planning during low-CI periods
+- **Auto-Discharge**: Automatic discharge triggering at planned export windows with configurable time constraints
+- **Battery Charge Planning**: Identifies lowest carbon intensity periods for optimal battery charging
 - **Alpha ESS Integration**: Works with Alpha ESS systems via the Hillview Lodge custom integration
 - **Solcast Forecasting**: Uses Solcast PV forecast data to predict production and optimize discharge
 - **Safety Margin**: Configurable safety margin (default 500W = 0.5kWh) to stay within T&C limits
 - **Automated Services**: Control discharge via services, automations, or manual buttons
-- **Real-time Monitoring**: Sensors showing safe export limits, discharge requirements, and system status
+- **Real-time Monitoring**: Comprehensive sensors showing export limits, discharge requirements, charge plans, and system status
 
 ## How It Works
 
@@ -125,6 +128,14 @@ input_number:
   - **Target Grid Export**: Target maximum export power in watts (default: 0)
   - **Minimum Battery SOC**: Minimum battery level before discharge stops (default: 20%)
   - **Safety Margin**: Additional margin in kWh to prevent T&C breaches (default: 0.5 kWh)
+  - **Carbon Intensity Forecast Sensor**: Optional sensor for CI-based planning
+  - **Enable CI Planning**: Toggle for carbon intensity discharge planning
+  - **Enable Auto-Discharge**: Toggle for automatic discharge at planned windows
+  - **Export Window Start/End**: Time constraints for discharge windows (default: 00:00 - 23:59)
+  - **Enable Charge Planning**: Toggle for intelligent charge planning
+  - **Charge Window Start/End**: Time constraints for charging windows (default: 00:00 - 06:00)
+  - **Charge Power**: Charge power in kW (default: 3.68 kW)
+  - **Battery Capacity**: Total battery capacity in kWh (default: 10 kWh)
 
 5. Click **Submit**
 
@@ -146,6 +157,9 @@ After setup, the integration creates the following entities:
 - **Start Discharge**: Manually trigger discharge based on current calculations
 - **Stop Discharge**: Stop active discharge immediately
 - **Calculate Discharge**: Recalculate discharge requirements
+
+### Switches
+- **Enable Auto-Discharge**: Toggle automatic discharge at planned export windows
 
 ### Numbers
 - **Target Export**: Set maximum grid export target (W)
@@ -181,13 +195,17 @@ After setup, the integration creates the following entities:
 - **Plan Windows Total** (count): Total windows across all planned periods
 - **Total Plan Energy** (kWh): Combined energy across all planned windows
 
+#### Charge Planning Sensors
+- **Charge Plan Today** (string): Formatted charge windows for today (HH:MM - HH:MM X.XXkWh)
+- **Charge Plan Tomorrow** (string): Formatted charge windows for tomorrow
+
 #### Diagnostic Sensors
 Located in the **Diagnostic** entity category:
 - **Current PV** (W): Current solar production power
 - **Forecast PV Today** (kWh): Expected total solar production for today
-- **Current SOC** (%): Current battery state of charge
+- **Current SOC** (%): Current battery state of charge (from configured sensor)
 - **Minimum SOC** (%): Configured minimum SOC threshold
-- **Export Allowed** (boolean): Whether grid export is currently allowed
+- **Export Allowed** (kWh): Calculated maximum export capacity
 - **Observe Reserve SOC** (boolean): Whether reserve SOC monitoring is active
 - **Reserve Limit Reached** (boolean): Whether battery reserve limit has been breached
 
@@ -447,9 +465,32 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## Changelog
 
-### 1.0.0 (2026-01-27)
+See [CHANGELOG.md](CHANGELOG.md) for full version history.
+
+### Recent Versions
+
+**1.8.1** (2026-02-04)
+- Fixed diagnostic sensors (Current SOC, Min SOC, Reserve SOC Target) showing Unknown
+
+**1.8.0** (2026-02-04)
+- Added battery capacity configuration for accurate charge planning
+- Energy calculations now use explicit battery capacity (0.5-100 kWh)
+
+**1.7.5** (2026-02-04)
+- Fixed Current SOC sensor handling when not configured
+
+**1.7.4** (2026-02-04)
+- Fixed Home Assistant state class warnings for energy sensors
+- Fixed charge plan generation conditional logic
+
+**1.7.0** (2026-02-04)
+- Added battery charge planning with lowest-CI optimization
+- Charge plan sensors for today/tomorrow
+- Charge window and power configuration
+
+**1.6.0** (2026-02-04)
+- Added auto-discharge feature with export window constraints
+- Fixed CI prioritization (high-CI for discharge, low-CI for charge)
+
+**1.0.0** (2026-01-27)
 - Initial release
-- Alpha ESS battery discharge control
-- Solcast forecast integration
-- Configurable safety margins
-- Real-time monitoring and automation services

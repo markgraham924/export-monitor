@@ -5,6 +5,54 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.1] - 2026-02-04
+
+### Fixed
+- **Diagnostic Sensors Display**: Added missing diagnostic values (current_soc, min_soc, reserve_soc_target) to coordinator data dictionary
+  - Fixes Current SOC, Minimum SOC, and Reserve SOC Target sensors showing "Unknown"
+  - GenericDiagnosticSensor now has access to all calculated values
+
+## [1.8.0] - 2026-02-04
+
+### Added
+- **Battery Capacity Configuration**: New required configuration field for battery total capacity in kWh (default: 10 kWh)
+  - Enables accurate energy calculations for charge planning
+  - Calculates energy needed as: `(100% - current_soc%) / 100 × battery_capacity_kwh`
+  - Configurable via UI with range 0.5 - 100 kWh in 0.1 kWh steps
+  - Added to user setup, reconfigure, and options flows
+
+### Changed
+- **Charge Plan Calculation**: Replaced heuristic battery capacity estimation with explicit configuration
+  - Today's charge plan: Calculates energy from current SOC to 100%
+  - Tomorrow's charge plan: Plans for full battery capacity charge
+  - More accurate energy allocation across low-CI periods
+
+## [1.7.5] - 2026-02-04
+
+### Fixed
+- **Current SOC Handling**: Changed from direct dictionary access to `.get()` method for CONF_CURRENT_SOC
+  - Prevents crashes when sensor configuration is missing
+  - Gracefully handles missing SOC sensor during initialization
+
+## [1.7.4] - 2026-02-04
+
+### Fixed
+- **State Class Warnings**: Removed MEASUREMENT state_class from energy device sensors
+  - Home Assistant expects energy device class to use None, TOTAL_INCREASING, or TOTAL for state_class
+  - Fixed warnings for: ExportHeadroomSensor, PlanEnergySensor entities
+- **Charge Plan Generation Logic**: Fixed conditional checks to ensure proper nested execution
+  - Checks current_soc availability before attempting charge planning
+  - Properly nests `if periods:` block within `if ci_data:` scope
+  - Prevents undefined variable access
+
+## [1.7.3] - 2026-02-04
+
+### Fixed
+- **Charge Plan Variable Scope**: Corrected undefined `parsed_ci` variable in charge plan generation
+  - Charge planning now independently fetches CI data
+  - Added proper null checks before accessing ci_data
+  - Fixes "name 'parsed_ci' is not defined" runtime error
+
 ## [1.7.2] - 2026-02-04
 
 ### Fixed
