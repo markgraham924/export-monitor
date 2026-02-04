@@ -59,6 +59,7 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_TARGET_EXPORT,
     DOMAIN,
+    SERVICE_START_DISCHARGE,
 )
 
 _LOGGER = logging.getLogger(__name__)
