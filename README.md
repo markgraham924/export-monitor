@@ -10,6 +10,30 @@
 
 A Home Assistant custom integration that intelligently controls Alpha ESS battery discharge based on Solcast PV forecasts to keep grid exports within safe limits and comply with energy provider terms and conditions.
 
+## ⚠️ Important Safety Notice
+
+**This is a critical service that controls battery discharge.** Incorrect operation can result in financial penalties from your energy provider if export limits are exceeded. 
+
+### Production Readiness Features (v1.10.0+)
+
+✅ **Comprehensive Error Handling**: All service calls protected with 5-second timeouts  
+✅ **Sensor Validation**: All values validated against reasonable ranges  
+✅ **Stale Data Detection**: Blocks discharge with outdated sensor data (>30s)  
+✅ **Circuit Breaker Protection**: Prevents cascade failures after 5 consecutive errors  
+✅ **System Health Monitoring**: 4 diagnostic sensors track system status  
+✅ **Persistent Notifications**: Critical failures notify user immediately  
+✅ **Emergency Procedures**: Documented recovery and failure scenarios  
+
+**📖 Before deploying to production, read [PRODUCTION_GUIDE.md](PRODUCTION_GUIDE.md)**
+
+This guide covers:
+- Pre-deployment checklist
+- Monitoring and health checks
+- 5 common failure scenarios with resolution steps
+- Emergency stop procedures
+- Logging and diagnostics
+- Compliance and safety considerations
+
 ## Features
 
 - **Smart Export Control**: Automatically calculates safe grid export limits based on PV production and forecasts
@@ -21,6 +45,7 @@ A Home Assistant custom integration that intelligently controls Alpha ESS batter
 - **Safety Margin**: Configurable safety margin (default 500W = 0.5kWh) to stay within T&C limits
 - **Automated Services**: Control discharge via services, automations, or manual buttons
 - **Real-time Monitoring**: Comprehensive sensors showing export limits, discharge requirements, charge plans, and system status
+- **Production-Ready Safety**: Error handling, validation, circuit breakers, and health monitoring
 
 ## How It Works
 
@@ -193,6 +218,37 @@ After setup, the integration creates the following entities:
 - **Plan Windows Today** (count): Number of discharge windows available today
 - **Plan Windows Tomorrow** (count): Number of discharge windows available tomorrow
 - **Plan Windows Total** (count): Total windows across all planned periods
+- **Total Plan Energy** (kWh): Combined energy across all planned windows
+
+#### System Health & Monitoring (Diagnostic)
+Located in the **Diagnostic** entity category - essential for production monitoring:
+
+- **System Health** (string): Overall system status
+  - `Healthy`: All systems operational
+  - `Error`: Critical error occurred (check Error State sensor)
+  - `Stale Data`: Sensor data too old (>30s)
+  - `Circuit Breaker Open`: Too many failures, system paused
+
+- **Error State** (string): Current error condition
+  - `none`: No errors
+  - `soc_read_failed`: Cannot read battery SOC
+  - `stale_data`: Coordinator data too old
+  - `discharge_power_set_failed`: Cannot set discharge power
+  - `discharge_start_failed`: Cannot start discharge
+  - `discharge_stop_failed`: **CRITICAL** - Cannot stop discharge
+  - `no_data`: No coordinator data available
+
+- **Data Staleness** (seconds): Age of coordinator data
+  - Normal: 0-15s
+  - Warning: 15-30s
+  - Critical: >30s (discharge blocked)
+
+- **Circuit Breaker Status** (string): Failure protection state
+  - `Closed`: Normal operation
+  - `Open`: Paused due to repeated failures (auto-resets after 60s)
+  - **Attributes**: failure_count, last_failure_time, can_attempt
+
+**⚠️ Monitor these sensors regularly in production!** See [PRODUCTION_GUIDE.md](PRODUCTION_GUIDE.md) for details.
 - **Total Plan Energy** (kWh): Combined energy across all planned windows
 
 #### Charge Planning Sensors
@@ -504,19 +560,23 @@ See [CHANGELOG.md](CHANGELOG.md) for full version history.
 
 ### Recent Versions
 
+**1.10.0** (2026-02-04) - **Production Readiness Update**
+- ✅ Added comprehensive error handling with 5-second timeouts for all service calls
+- ✅ Implemented sensor value validation with reasonable ranges (SOC: 0-100%, Energy: 0-1000kWh)
+- ✅ Added stale data detection (blocks discharge when data >30s old)
+- ✅ Implemented circuit breaker pattern (opens after 5 failures, auto-resets after 60s)
+- ✅ Created 4 system health diagnostic sensors (System Health, Error State, Data Staleness, Circuit Breaker)
+- ✅ Added persistent notifications for critical failures with recovery guidance
+- ✅ Created comprehensive [PRODUCTION_GUIDE.md](PRODUCTION_GUIDE.md) (500+ lines)
+- ✅ CodeQL security scan passed (0 vulnerabilities)
+- 📖 See [PRODUCTION_GUIDE.md](PRODUCTION_GUIDE.md) for deployment best practices
+
 **1.8.1** (2026-02-04)
 - Fixed diagnostic sensors (Current SOC, Min SOC, Reserve SOC Target) showing Unknown
 
 **1.8.0** (2026-02-04)
 - Added battery capacity configuration for accurate charge planning
 - Energy calculations now use explicit battery capacity (0.5-100 kWh)
-
-**1.7.5** (2026-02-04)
-- Fixed Current SOC sensor handling when not configured
-
-**1.7.4** (2026-02-04)
-- Fixed Home Assistant state class warnings for energy sensors
-- Fixed charge plan generation conditional logic
 
 **1.7.0** (2026-02-04)
 - Added battery charge planning with lowest-CI optimization
