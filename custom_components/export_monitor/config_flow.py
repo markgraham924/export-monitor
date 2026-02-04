@@ -15,9 +15,14 @@ from .const import (
     CONF_DISCHARGE_BUTTON,
     CONF_DISCHARGE_CUTOFF_SOC,
     CONF_DISCHARGE_POWER,
+    CONF_CHARGE_BUTTON,
+    CONF_CHARGE_POWER_ENTITY,
+    CONF_CHARGE_DURATION,
+    CONF_CHARGE_CUTOFF_SOC,
     CONF_CI_FORECAST_SENSOR,
     CONF_ENABLE_CI_PLANNING,
     CONF_ENABLE_AUTO_DISCHARGE,
+    CONF_ENABLE_AUTO_CHARGE,
     CONF_EXPORT_WINDOW_START,
     CONF_EXPORT_WINDOW_END,
     CONF_ENABLE_CHARGE_PLANNING,
@@ -37,6 +42,7 @@ from .const import (
     CONF_TARGET_EXPORT,
     DEFAULT_ENABLE_CI_PLANNING,
     DEFAULT_ENABLE_AUTO_DISCHARGE,
+    DEFAULT_ENABLE_AUTO_CHARGE,
     DEFAULT_EXPORT_WINDOW_START,
     DEFAULT_EXPORT_WINDOW_END,
     DEFAULT_ENABLE_CHARGE_PLANNING,
@@ -128,6 +134,26 @@ class ExportMonitorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         domain=["number", "input_number"],
                     )
                 ),
+                vol.Required(CONF_CHARGE_BUTTON): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain=["input_boolean", "switch"],
+                    )
+                ),
+                vol.Required(CONF_CHARGE_POWER_ENTITY): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain=["number", "input_number"],
+                    )
+                ),
+                vol.Required(CONF_CHARGE_DURATION): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain=["number", "input_number"],
+                    )
+                ),
+                vol.Required(CONF_CHARGE_CUTOFF_SOC): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain=["number", "input_number"],
+                    )
+                ),
                 vol.Required(CONF_CURRENT_SOC): selector.EntitySelector(
                     selector.EntitySelectorConfig(
                         domain="sensor",
@@ -214,6 +240,9 @@ class ExportMonitorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_ENABLE_AUTO_DISCHARGE, default=DEFAULT_ENABLE_AUTO_DISCHARGE
                 ): selector.BooleanSelector(),
                 vol.Optional(
+                    CONF_ENABLE_AUTO_CHARGE, default=DEFAULT_ENABLE_AUTO_CHARGE
+                ): selector.BooleanSelector(),
+                vol.Optional(
                     CONF_EXPORT_WINDOW_START, default=DEFAULT_EXPORT_WINDOW_START
                 ): selector.TimeSelector(),
                 vol.Optional(
@@ -288,6 +317,10 @@ class ExportMonitorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_DISCHARGE_BUTTON,
                 CONF_DISCHARGE_POWER,
                 CONF_DISCHARGE_CUTOFF_SOC,
+                CONF_CHARGE_BUTTON,
+                CONF_CHARGE_POWER_ENTITY,
+                CONF_CHARGE_DURATION,
+                CONF_CHARGE_CUTOFF_SOC,
                 CONF_CURRENT_SOC,
                 CONF_PV_ENERGY_TODAY,
                 CONF_GRID_FEED_TODAY,
@@ -329,6 +362,38 @@ class ExportMonitorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(
                     CONF_DISCHARGE_CUTOFF_SOC,
                     default=current_data.get(CONF_DISCHARGE_CUTOFF_SOC),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain=["number", "input_number"],
+                    )
+                ),
+                vol.Required(
+                    CONF_CHARGE_BUTTON,
+                    default=current_data.get(CONF_CHARGE_BUTTON),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain=["input_boolean", "switch"],
+                    )
+                ),
+                vol.Required(
+                    CONF_CHARGE_POWER_ENTITY,
+                    default=current_data.get(CONF_CHARGE_POWER_ENTITY),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain=["number", "input_number"],
+                    )
+                ),
+                vol.Required(
+                    CONF_CHARGE_DURATION,
+                    default=current_data.get(CONF_CHARGE_DURATION),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain=["number", "input_number"],
+                    )
+                ),
+                vol.Required(
+                    CONF_CHARGE_CUTOFF_SOC,
+                    default=current_data.get(CONF_CHARGE_CUTOFF_SOC),
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(
                         domain=["number", "input_number"],
@@ -449,6 +514,10 @@ class ExportMonitorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(
                     CONF_ENABLE_AUTO_DISCHARGE,
                     default=current_data.get(CONF_ENABLE_AUTO_DISCHARGE, DEFAULT_ENABLE_AUTO_DISCHARGE),
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_ENABLE_AUTO_CHARGE,
+                    default=current_data.get(CONF_ENABLE_AUTO_CHARGE, DEFAULT_ENABLE_AUTO_CHARGE),
                 ): selector.BooleanSelector(),
                 vol.Optional(
                     CONF_EXPORT_WINDOW_START,
@@ -576,6 +645,10 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 vol.Optional(
                     CONF_ENABLE_AUTO_DISCHARGE,
                     default=current_data.get(CONF_ENABLE_AUTO_DISCHARGE, DEFAULT_ENABLE_AUTO_DISCHARGE),
+                ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_ENABLE_AUTO_CHARGE,
+                    default=current_data.get(CONF_ENABLE_AUTO_CHARGE, DEFAULT_ENABLE_AUTO_CHARGE),
                 ): selector.BooleanSelector(),
                 vol.Optional(
                     CONF_EXPORT_WINDOW_START,
