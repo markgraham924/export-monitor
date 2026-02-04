@@ -497,6 +497,235 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
 
         return None, None
 
+    def _generate_charge_plan_today(
+        self,
+        periods: list[dict],
+        current_soc: float,
+        discharge_cutoff_soc: float,
+        charge_power_kw: float,
+        charge_window_start: str,
+        charge_window_end: str,
+    ) -> list[dict]:
+        """Generate charge plan for today based on LOWEST CI periods.
+        
+        Args:
+            periods: CI forecast periods
+            current_soc: Current battery state of charge (%)
+            discharge_cutoff_soc: Battery capacity reference (full charge SOC %)
+            charge_power_kw: Charge power in kW
+            charge_window_start: Charge window start time (HH:MM)
+            charge_window_end: Charge window end time (HH:MM)
+            
+        Returns:
+            List of charge plan windows with start/end times and energy
+        """
+        if not periods or charge_power_kw <= 0:
+            return []
+        
+        # Calculate energy needed to reach 100% SOC
+        # Assuming discharge_cutoff_soc sensor represents battery capacity at 100%
+        # We derive capacity from current SOC reading
+        if current_soc >= 100:
+            return []  # Already fully charged
+        
+        # Energy needed = (100% - current%) * capacity
+        # Capacity = energy_at_current_soc / (current_soc / 100)
+        # But we don't have absolute energy, so we work with SOC difference
+        soc_to_charge = 100 - current_soc  # Percentage to charge
+        
+        # Use discharge_cutoff_soc as battery capacity reference (in kWh equivalent)
+        # This is a simplification - ideally would have explicit battery_capacity config
+        battery_capacity_kwh = discharge_cutoff_soc / 10  # Rough estimate from SOC sensor
+        energy_needed_kwh = (soc_to_charge / 100) * battery_capacity_kwh
+        
+        if energy_needed_kwh <= 0:
+            return []
+        
+        # Parse charge window times
+        try:
+            window_start_hour, window_start_min = map(int, charge_window_start.split(":"))
+            window_end_hour, window_end_min = map(int, charge_window_end.split(":"))
+        except (ValueError, AttributeError):
+            _LOGGER.error("Invalid charge window times: %s - %s", charge_window_start, charge_window_end)
+            return []
+        
+        now = datetime.now(timezone.utc)
+        today = now.date()
+        
+        # Filter periods to today and within charge window
+        filtered_periods = []
+        for period in periods:
+            try:
+                from_time = datetime.fromisoformat(period["from"].replace("Z", "+00:00"))
+                to_time = datetime.fromisoformat(period["to"].replace("Z", "+00:00"))
+                
+                # Only today's periods
+                if from_time.date() != today:
+                    continue
+                
+                # Check if period overlaps with charge window
+                period_start_time = from_time.time()
+                period_end_time = to_time.time()
+                window_start_time = time(window_start_hour, window_start_min)
+                window_end_time = time(window_end_hour, window_end_min)
+                
+                # Handle overnight window (e.g., 23:00 - 06:00)
+                if window_start_time <= window_end_time:
+                    # Normal window within same day
+                    if period_end_time < window_start_time or period_start_time > window_end_time:
+                        continue
+                else:
+                    # Overnight window
+                    if period_end_time < window_start_time and period_start_time > window_end_time:
+                        continue
+                
+                ci_value = period.get("intensity", {}).get("forecast", 0)
+                filtered_periods.append({
+                    "from": from_time,
+                    "to": to_time,
+                    "ci": ci_value,
+                })
+            except (ValueError, KeyError) as err:
+                _LOGGER.debug("Skipping invalid period: %s", err)
+                continue
+        
+        if not filtered_periods:
+            _LOGGER.info("No charge periods found in window %s - %s", charge_window_start, charge_window_end)
+            return []
+        
+        # Sort by CI ascending (lowest first for charging)
+        filtered_periods.sort(key=lambda p: p["ci"])
+        
+        # Allocate energy to lowest CI periods
+        plan = []
+        remaining_energy = energy_needed_kwh
+        
+        for period in filtered_periods:
+            if remaining_energy <= 0:
+                break
+            
+            # Calculate period duration
+            period_duration_hours = (period["to"] - period["from"]).total_seconds() / 3600
+            
+            # Energy that can be charged in this period
+            period_energy = charge_power_kw * period_duration_hours
+            
+            # Allocate energy (limited by what's needed)
+            allocated_energy = min(period_energy, remaining_energy)
+            
+            plan.append({
+                "period_start": period["from"].isoformat(),
+                "period_end": period["to"].isoformat(),
+                "energy_kwh": round(allocated_energy, 3),
+                "ci_value": period["ci"],
+            })
+            
+            remaining_energy -= allocated_energy
+        
+        _LOGGER.info(
+            "Generated charge plan: %d periods, %.3f kWh total (needed %.3f kWh)",
+            len(plan),
+            sum(p["energy_kwh"] for p in plan),
+            energy_needed_kwh,
+        )
+        
+        return plan
+
+    def _generate_charge_plan_tomorrow(
+        self,
+        periods: list[dict],
+        discharge_cutoff_soc: float,
+        charge_power_kw: float,
+        charge_window_start: str,
+        charge_window_end: str,
+    ) -> list[dict]:
+        """Generate charge plan for tomorrow based on LOWEST CI periods.
+        
+        Similar to today's plan but assumes starting from current SOC at midnight.
+        """
+        if not periods or charge_power_kw <= 0:
+            return []
+        
+        # For tomorrow, assume we want to reach 100% from some baseline
+        # Use a conservative estimate - charge to 80% of capacity
+        battery_capacity_kwh = discharge_cutoff_soc / 10
+        energy_needed_kwh = 0.8 * battery_capacity_kwh  # Assume 80% charge needed
+        
+        # Parse charge window times
+        try:
+            window_start_hour, window_start_min = map(int, charge_window_start.split(":"))
+            window_end_hour, window_end_min = map(int, charge_window_end.split(":"))
+        except (ValueError, AttributeError):
+            _LOGGER.error("Invalid charge window times: %s - %s", charge_window_start, charge_window_end)
+            return []
+        
+        now = datetime.now(timezone.utc)
+        tomorrow = (now + timedelta(days=1)).date()
+        
+        # Filter periods to tomorrow and within charge window
+        filtered_periods = []
+        for period in periods:
+            try:
+                from_time = datetime.fromisoformat(period["from"].replace("Z", "+00:00"))
+                to_time = datetime.fromisoformat(period["to"].replace("Z", "+00:00"))
+                
+                # Only tomorrow's periods
+                if from_time.date() != tomorrow:
+                    continue
+                
+                # Check if period overlaps with charge window
+                period_start_time = from_time.time()
+                period_end_time = to_time.time()
+                window_start_time = time(window_start_hour, window_start_min)
+                window_end_time = time(window_end_hour, window_end_min)
+                
+                # Handle overnight window
+                if window_start_time <= window_end_time:
+                    if period_end_time < window_start_time or period_start_time > window_end_time:
+                        continue
+                else:
+                    if period_end_time < window_start_time and period_start_time > window_end_time:
+                        continue
+                
+                ci_value = period.get("intensity", {}).get("forecast", 0)
+                filtered_periods.append({
+                    "from": from_time,
+                    "to": to_time,
+                    "ci": ci_value,
+                })
+            except (ValueError, KeyError) as err:
+                _LOGGER.debug("Skipping invalid period: %s", err)
+                continue
+        
+        if not filtered_periods:
+            return []
+        
+        # Sort by CI ascending (lowest first)
+        filtered_periods.sort(key=lambda p: p["ci"])
+        
+        # Allocate energy to lowest CI periods
+        plan = []
+        remaining_energy = energy_needed_kwh
+        
+        for period in filtered_periods:
+            if remaining_energy <= 0:
+                break
+            
+            period_duration_hours = (period["to"] - period["from"]).total_seconds() / 3600
+            period_energy = charge_power_kw * period_duration_hours
+            allocated_energy = min(period_energy, remaining_energy)
+            
+            plan.append({
+                "period_start": period["from"].isoformat(),
+                "period_end": period["to"].isoformat(),
+                "energy_kwh": round(allocated_energy, 3),
+                "ci_value": period["ci"],
+            })
+            
+            remaining_energy -= allocated_energy
+        
+        return plan
+
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch data from sensors and calculate discharge requirements."""
         config_data = {**self.entry.data, **self.entry.options}
@@ -681,6 +910,49 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                             sum(p.get("energy_kwh", 0) for p in discharge_plan_tomorrow),
                         )
 
+        # Generate charge plans if charge planning is enabled
+        charge_plan_today = []
+        charge_plan_tomorrow = []
+        enable_charge_planning = config_data.get(CONF_ENABLE_CHARGE_PLANNING, False)
+        if enable_charge_planning and parsed_ci:
+            periods = parsed_ci.get("data", [])
+            if periods:
+                discharge_cutoff_soc_sensor = config_data.get(CONF_DISCHARGE_CUTOFF_SOC)
+                discharge_cutoff_soc_value = self._get_sensor_value(discharge_cutoff_soc_sensor) if discharge_cutoff_soc_sensor else 100
+                
+                charge_power_kw = config_data.get(CONF_CHARGE_POWER_KW, DEFAULT_CHARGE_POWER_KW)
+                charge_window_start = config_data.get(CONF_CHARGE_WINDOW_START, DEFAULT_CHARGE_WINDOW_START)
+                charge_window_end = config_data.get(CONF_CHARGE_WINDOW_END, DEFAULT_CHARGE_WINDOW_END)
+                
+                # Generate charge plan for today
+                charge_plan_today = self._generate_charge_plan_today(
+                    periods,
+                    current_soc,
+                    discharge_cutoff_soc_value,
+                    charge_power_kw,
+                    charge_window_start,
+                    charge_window_end,
+                )
+                _LOGGER.debug(
+                    "Generated today's CI charge plan: %d periods, %.3f kWh total",
+                    len(charge_plan_today),
+                    sum(p.get("energy_kwh", 0) for p in charge_plan_today),
+                )
+                
+                # Generate charge plan for tomorrow
+                charge_plan_tomorrow = self._generate_charge_plan_tomorrow(
+                    periods,
+                    discharge_cutoff_soc_value,
+                    charge_power_kw,
+                    charge_window_start,
+                    charge_window_end,
+                )
+                _LOGGER.debug(
+                    "Generated tomorrow's CI charge plan: %d periods, %.3f kWh total",
+                    len(charge_plan_tomorrow),
+                    sum(p.get("energy_kwh", 0) for p in charge_plan_tomorrow),
+                )
+
         # Check for auto-discharge trigger
         enable_auto_discharge = config_data.get(CONF_ENABLE_AUTO_DISCHARGE, False)
         if enable_auto_discharge and discharge_plan_today:
@@ -707,6 +979,8 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
             ATTR_DISCHARGE_PLAN: discharge_plan_today,  # Keep backward compatibility
             ATTR_DISCHARGE_PLAN_TODAY: discharge_plan_today,
             ATTR_DISCHARGE_PLAN_TOMORROW: discharge_plan_tomorrow,
+            ATTR_CHARGE_PLAN_TODAY: charge_plan_today,
+            ATTR_CHARGE_PLAN_TOMORROW: charge_plan_tomorrow,
             ATTR_CURRENT_CI_VALUE: current_ci_value,
             ATTR_CURRENT_CI_INDEX: current_ci_index,
             "reserve_limit_reached": reserve_limit_reached,
