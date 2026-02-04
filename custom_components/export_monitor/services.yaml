@@ -9,3 +9,11 @@ stop_discharge:
 calculate_discharge:
   name: Calculate Discharge
   description: Recalculate discharge requirements based on current conditions.
+
+start_charge:
+  name: Start Charge
+  description: Start charging battery from grid during low carbon intensity periods. Power and duration are automatically calculated based on the next charge session plan.
+
+stop_charge:
+  name: Stop Charge
+  description: Stop charging battery from grid.

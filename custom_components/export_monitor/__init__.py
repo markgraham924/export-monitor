@@ -17,6 +17,10 @@ from .const import (
     CONF_DISCHARGE_BUTTON,
     CONF_DISCHARGE_CUTOFF_SOC,
     CONF_DISCHARGE_POWER,
+    CONF_CHARGE_BUTTON,
+    CONF_CHARGE_POWER_ENTITY,
+    CONF_CHARGE_DURATION,
+    CONF_CHARGE_CUTOFF_SOC,
     CONF_GRID_FEED_TODAY,
     CONF_MIN_SOC,
     CONF_PV_ENERGY_TODAY,
@@ -31,6 +35,8 @@ from .const import (
     SERVICE_CALCULATE_DISCHARGE,
     SERVICE_START_DISCHARGE,
     SERVICE_STOP_DISCHARGE,
+    SERVICE_START_CHARGE,
+    SERVICE_STOP_CHARGE,
 )
 from .coordinator import ExportMonitorCoordinator
 
@@ -314,6 +320,134 @@ async def async_setup_services(
                 safe_limit,
             )
     
+    async def handle_start_charge(call: ServiceCall) -> None:
+        """Handle start charge service call."""
+        config_data = {**coordinator.entry.data, **coordinator.entry.options}
+        
+        # Get next charge session from coordinator
+        if not coordinator.data or "next_charge_session" not in coordinator.data:
+            _LOGGER.error("Cannot start charge: no charge session data available")
+            return
+        
+        charge_session = coordinator.data.get("next_charge_session", [])
+        if not charge_session:
+            _LOGGER.info("No charge session planned, nothing to do")
+            return
+        
+        # Calculate total energy needed from session
+        total_energy_kwh = sum(p.get("energy_kwh", 0) for p in charge_session)
+        
+        # Get charge control entities
+        charge_button_entity = config_data.get(CONF_CHARGE_BUTTON)
+        charge_power_entity = config_data.get(CONF_CHARGE_POWER_ENTITY)
+        charge_duration_entity = config_data.get(CONF_CHARGE_DURATION)
+        charge_cutoff_soc_entity = config_data.get(CONF_CHARGE_CUTOFF_SOC)
+        
+        if not all([charge_button_entity, charge_power_entity, charge_duration_entity, charge_cutoff_soc_entity]):
+            _LOGGER.error("Charge control entities not configured")
+            return
+        
+        # Calculate charge duration from first window
+        first_window = charge_session[0]
+        try:
+            from datetime import datetime
+            window_start = datetime.fromisoformat(first_window.get("period_start", ""))
+            window_end = datetime.fromisoformat(first_window.get("period_end", ""))
+            duration_hours = (window_end - window_start).total_seconds() / 3600
+            duration_minutes = duration_hours * 60
+        except (ValueError, TypeError) as err:
+            _LOGGER.error("Error calculating charge duration: %s", err)
+            duration_minutes = 30  # Default to 30 minutes
+        
+        # Get charge power from first window (energy / duration)
+        first_window_energy = first_window.get("energy_kwh", 0)
+        if duration_hours > 0:
+            charge_power_kw = first_window_energy / duration_hours
+        else:
+            charge_power_kw = 3.68  # Default charge power
+        
+        _LOGGER.info(
+            "Starting charge: %.2f kW for %.1f min (target: 100%% SOC, %.3f kWh total)",
+            charge_power_kw,
+            duration_minutes,
+            total_energy_kwh,
+        )
+        
+        # Set charge power
+        domain, service = _get_domain_and_service(charge_power_entity, "set_value")
+        await hass.services.async_call(
+            domain,
+            service,
+            {
+                "entity_id": charge_power_entity,
+                "value": charge_power_kw,
+            },
+            blocking=True,
+        )
+        
+        # Set charge duration
+        domain, service = _get_domain_and_service(charge_duration_entity, "set_value")
+        await hass.services.async_call(
+            domain,
+            service,
+            {
+                "entity_id": charge_duration_entity,
+                "value": duration_minutes,
+            },
+            blocking=True,
+        )
+        
+        # Set cutoff SOC to 100% (always charge to full)
+        domain, service = _get_domain_and_service(charge_cutoff_soc_entity, "set_value")
+        await hass.services.async_call(
+            domain,
+            service,
+            {
+                "entity_id": charge_cutoff_soc_entity,
+                "value": 100,
+            },
+            blocking=True,
+        )
+        
+        # Enable charge button
+        domain, service = _get_domain_and_service(charge_button_entity, "turn_on")
+        await hass.services.async_call(
+            domain,
+            service,
+            {"entity_id": charge_button_entity},
+            blocking=True,
+        )
+        
+        coordinator.set_charge_active(True)
+        
+        _LOGGER.info(
+            "Charge started: %.2f kW for %.1f min (target: 100%% SOC)",
+            charge_power_kw,
+            duration_minutes,
+        )
+    
+    async def handle_stop_charge(call: ServiceCall) -> None:
+        """Handle stop charge service call."""
+        config_data = {**coordinator.entry.data, **coordinator.entry.options}
+        charge_button_entity = config_data.get(CONF_CHARGE_BUTTON)
+        
+        if not charge_button_entity:
+            _LOGGER.error("Charge button entity not configured")
+            return
+        
+        # Disable charge button
+        domain, service = _get_domain_and_service(charge_button_entity, "turn_off")
+        await hass.services.async_call(
+            domain,
+            service,
+            {"entity_id": charge_button_entity},
+            blocking=True,
+        )
+        
+        coordinator.set_charge_active(False)
+        
+        _LOGGER.info("Stopped charge")
+    
     # Register services
     hass.services.async_register(
         DOMAIN,
@@ -333,6 +467,20 @@ async def async_setup_services(
         DOMAIN,
         SERVICE_CALCULATE_DISCHARGE,
         handle_calculate_discharge,
+        schema=vol.Schema({}),
+    )
+    
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_START_CHARGE,
+        handle_start_charge,
+        schema=vol.Schema({}),
+    )
+    
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_STOP_CHARGE,
+        handle_stop_charge,
         schema=vol.Schema({}),
     )
 
