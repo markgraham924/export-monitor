@@ -1,6 +1,6 @@
 # Energy Export Monitor Tests
 
-Comprehensive test suite for the Energy Export Monitor integration, covering CI planning features and core discharge functionality.
+Comprehensive test suite for the Energy Export Monitor integration, covering CI planning features, core discharge functionality, and code quality checks.
 
 ## Test Files
 
@@ -16,7 +16,7 @@ Carbon Intensity (CI) planning feature tests.
 ### test_core_functionality.py
 Core discharge and energy management logic tests.
 
-**Coverage (51 tests):**
+**Coverage (58 tests):**
 - ✅ **Discharge Duration Calculation** (7 tests) - Formula verification, buffer application, edge cases
 - ✅ **Export Headroom Calculation** (7 tests) - SOC-based headroom, safety margins, capacity limits
 - ✅ **Button Availability Logic** (8 tests) - Start/stop button conditions, state transitions
@@ -24,15 +24,38 @@ Core discharge and energy management logic tests.
 - ✅ **Sensor State Calculations** (8 tests) - Headroom, discharge status, duration, CI values
 - ✅ **Energy Consistency** (5 tests) - Round-trip calculations, multi-window tracking
 - ✅ **Edge Cases** (6 tests) - Fractional values, extreme power ranges, precision handling
+- ✅ **Charge Plan Generation** (7 tests) - CI sorting, energy allocation, window filtering, overnight windows
+
+### test_integration.py
+**NEW:** Smoke tests that catch runtime errors before deployment.
+
+**Coverage (4 tests):**
+- ✅ **Variable Name Consistency** - Detects undefined variables like `min_soc_percent` vs `min_soc`
+- ✅ **Return Dictionary Validation** - Checks that all dict values reference defined variables
+- ✅ **Import Completeness** - Verifies all CONF_/DEFAULT_ constants are imported
+- ✅ **Test Quality Check** - Ensures all test methods have assertions
+
+**Purpose:** These tests analyze the coordinator.py source code to detect common runtime errors that unit tests miss:
+- Variable name mismatches (the root cause of v1.8.2 bug)
+- Missing imports for constants
+- Dictionary keys referencing undefined variables
+
+**Example Bug Detection:**
+When `min_soc_percent` was used instead of `min_soc` (v1.8.2 bug), this test now fails:
+```
+FAILED - Variable name issues found:
+Line 277: Found usage of 'min_soc_percent' but only 'min_soc' is defined in function scope
+```
 
 ## Test Statistics
 
-**Total Tests:** 71
+**Total Tests:** 82
 - CI Planning: 20 tests
-- Core Functionality: 51 tests
+- Core Functionality: 58 tests  
+- Smoke Tests: 4 tests
 
-**Execution Time:** ~0.14 seconds
-**Pass Rate:** 100% (71/71)
+**Execution Time:** ~0.15 seconds
+**Pass Rate:** 100% (82/82)
 
 ## Running Tests Locally
 

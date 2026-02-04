@@ -25,8 +25,6 @@ from .const import (
     ATTR_DISCHARGE_PLAN,
     ATTR_DISCHARGE_PLAN_TODAY,
     ATTR_DISCHARGE_PLAN_TOMORROW,
-    ATTR_CHARGE_PLAN_TODAY,
-    ATTR_CHARGE_PLAN_TOMORROW,
     ATTR_EXPORT_ALLOWED,
     ATTR_EXPORT_HEADROOM,
     ATTR_EXPORTED_TODAY,
@@ -81,8 +79,7 @@ async def async_setup_entry(
         PlanWindowSensor(coordinator, entry, ATTR_DISCHARGE_PLAN, "Plan Windows Total"),
         PlanWindowSensor(coordinator, entry, ATTR_DISCHARGE_PLAN_TODAY, "Plan Windows Today"),
         PlanWindowSensor(coordinator, entry, ATTR_DISCHARGE_PLAN_TOMORROW, "Plan Windows Tomorrow"),
-        ChargePlanSensor(coordinator, entry, ATTR_CHARGE_PLAN_TODAY, "Charge Plan Today"),
-        ChargePlanSensor(coordinator, entry, ATTR_CHARGE_PLAN_TOMORROW, "Charge Plan Tomorrow"),
+        NextChargeSessionSensor(coordinator, entry),
     ]
 
     async_add_entities(sensors + diagnostics + plan_details)
@@ -627,4 +624,82 @@ class ChargePlanSensor(ExportMonitorSensor):
                 continue
         
         return "\n".join(windows) if windows else "No windows"
+
+
+class NextChargeSessionSensor(ExportMonitorSensor):
+    """Sensor for next charge session plan display.
+    
+    Unlike discharge planning which is split by day, charge planning is simpler:
+    show the next upcoming charge session (typically overnight). This is more
+    intuitive since charge windows are usually 00:00-07:00, and at 17:31 the
+    "next charge session" is tonight/tomorrow morning, not split by calendar days.
+    """
+
+    def __init__(self, coordinator: ExportMonitorCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(
+            coordinator,
+            entry,
+            "next_charge_session",
+            "Next Charge Session",
+            "mdi:battery-charging-low"
+        )
+
+    @property
+    def native_value(self) -> str | None:
+        """Return formatted next charge session plan."""
+        if not self.coordinator.data:
+            return None
+        
+        plan = self.coordinator.data.get("next_charge_session", [])
+        if not plan:
+            return "No charge session planned"
+        
+        # Format each window as "HH:MM - HH:MM 0.60kWh"
+        windows = []
+        total_energy = 0
+        for period in plan:
+            try:
+                start = period.get("period_start", "")
+                end = period.get("period_end", "")
+                energy = period.get("energy_kwh", 0)
+                ci_value = period.get("ci_value", 0)
+                total_energy += energy
+                
+                if start and end:
+                    # Extract time portion from ISO format
+                    start_time = start.split("T")[1][:5] if "T" in start else start
+                    end_time = end.split("T")[1][:5] if "T" in end else end
+                    windows.append(f"{start_time} - {end_time} {energy:.2f}kWh (CI:{ci_value})")
+            except (KeyError, IndexError, AttributeError):
+                continue
+        
+        if not windows:
+            return "No windows"
+        
+        # Add total energy summary at the end
+        result = "\n".join(windows)
+        if len(windows) > 1:
+            result += f"\nTotal: {total_energy:.2f}kWh"
+        
+        return result
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return additional attributes."""
+        if not self.coordinator.data:
+            return {}
+        
+        plan = self.coordinator.data.get("next_charge_session", [])
+        
+        total_energy = sum(p.get("energy_kwh", 0) for p in plan)
+        num_windows = len(plan)
+        avg_ci = sum(p.get("ci_value", 0) for p in plan) / num_windows if num_windows > 0 else 0
+        
+        return {
+            "total_energy_kwh": round(total_energy, 3),
+            "number_of_windows": num_windows,
+            "average_ci": round(avg_ci, 1),
+            "plan_details": plan,
+        }
+
 

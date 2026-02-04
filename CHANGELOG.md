@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] - 2026-02-04
+
+### Changed
+- **Charge Planning Refactor**: Simplified charge plan logic to single "Next Charge Session" sensor
+  - Removed "Charge Plan Today" and "Charge Plan Tomorrow" (confusing for overnight windows)
+  - New "Next Charge Session" sensor shows upcoming charge window with greenest (lowest CI) periods
+  - Logic finds next charge window from current time and allocates energy to lowest CI periods
+  - More intuitive: At 17:31, next session is tonight (00:00-07:00), not split by calendar days
+  - Displays windows with times, energy amounts, and CI values; includes attributes for total_energy, num_windows, avg_ci
+
+### Added
+- **Smoke Tests**: New integration test suite to catch runtime errors before deployment
+  - `test_coordinator_no_undefined_variables`: Detects variable name mismatches (e.g., min_soc vs min_soc_percent)
+  - `test_coordinator_return_dict_keys`: Verifies return dictionary keys reference defined variables
+  - `test_coordinator_import_completeness`: Ensures all CONF_/DEFAULT_ constants are imported
+  - `test_all_test_files_have_assertions`: Validates test code quality
+  - Successfully caught the v1.8.2 bug pattern if reintroduced
+  - 82 total tests (78 unit + 4 smoke), all passing
+
 ## [1.8.1] - 2026-02-04
 
 ### Fixed

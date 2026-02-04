@@ -510,6 +510,186 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
 
         return None, None
 
+    def _generate_next_charge_session(
+        self,
+        periods: list[dict],
+        current_soc: float,
+        charge_power_kw: float,
+        charge_window_start: str,
+        charge_window_end: str,
+        battery_capacity_kwh: float,
+    ) -> list[dict]:
+        """Generate charge plan for the next upcoming charge session.
+        
+        Unlike discharge planning which has T&Cs restrictions, charge planning
+        is simpler: charge during the greenest (lowest CI) periods in the next
+        charge window. Since charge windows are typically overnight (00:00-07:00),
+        we look forward to find the next charge window and plan for that session.
+        
+        Args:
+            periods: CI forecast periods
+            current_soc: Current battery state of charge (%)
+            charge_power_kw: Charge power in kW
+            charge_window_start: Charge window start time (HH:MM)
+            charge_window_end: Charge window end time (HH:MM)
+            battery_capacity_kwh: Battery total capacity in kWh
+            
+        Returns:
+            List of charge plan windows with start/end times and energy
+        """
+        if not periods or charge_power_kw <= 0 or battery_capacity_kwh <= 0:
+            return []
+        
+        # Calculate energy needed to reach 100% SOC
+        if current_soc >= 100:
+            return []  # Already fully charged
+        
+        soc_to_charge = 100 - current_soc  # Percentage to charge
+        energy_needed_kwh = (soc_to_charge / 100) * battery_capacity_kwh
+        
+        if energy_needed_kwh <= 0:
+            return []
+        
+        # Parse charge window times
+        try:
+            window_start_hour, window_start_min = map(int, charge_window_start.split(":"))
+            window_end_hour, window_end_min = map(int, charge_window_end.split(":"))
+        except (ValueError, AttributeError):
+            _LOGGER.error("Invalid charge window times: %s - %s", charge_window_start, charge_window_end)
+            return []
+        
+        now = datetime.now(timezone.utc)
+        window_start_time = time(window_start_hour, window_start_min)
+        window_end_time = time(window_end_hour, window_end_min)
+        
+        # Determine when the next charge window starts
+        # If charge window is overnight (e.g., 00:00-07:00) and it's currently 17:31,
+        # the next charge window starts tonight at 00:00 (which is tomorrow's date)
+        current_time = now.time()
+        
+        # Check if we're currently in a charge window
+        in_window = False
+        if window_start_time <= window_end_time:
+            # Normal window (e.g., 08:00-16:00)
+            in_window = window_start_time <= current_time <= window_end_time
+        else:
+            # Overnight window (e.g., 23:00-06:00)
+            in_window = current_time >= window_start_time or current_time <= window_end_time
+        
+        # Find the next charge window start datetime
+        if in_window:
+            # We're in the window now, so "next" session is happening now
+            next_window_start = now
+        else:
+            # Find when the next window starts
+            if window_start_time <= window_end_time:
+                # Normal window
+                if current_time < window_start_time:
+                    # Window is later today
+                    next_window_start = datetime.combine(now.date(), window_start_time, tzinfo=timezone.utc)
+                else:
+                    # Window is tomorrow
+                    next_window_start = datetime.combine(now.date() + timedelta(days=1), window_start_time, tzinfo=timezone.utc)
+            else:
+                # Overnight window
+                if current_time < window_start_time and current_time > window_end_time:
+                    # We're between end and start, so next window starts today
+                    next_window_start = datetime.combine(now.date(), window_start_time, tzinfo=timezone.utc)
+                else:
+                    # Window either started yesterday and we're past the end,
+                    # or we need to wait for tonight's window
+                    if current_time <= window_end_time:
+                        # We're past midnight but before window end - next is tomorrow
+                        next_window_start = datetime.combine(now.date() + timedelta(days=1), window_start_time, tzinfo=timezone.utc)
+                    else:
+                        # We're after window end - next is tonight
+                        next_window_start = datetime.combine(now.date(), window_start_time, tzinfo=timezone.utc)
+        
+        # Calculate next window end
+        if window_start_time <= window_end_time:
+            # Normal window
+            next_window_end = datetime.combine(next_window_start.date(), window_end_time, tzinfo=timezone.utc)
+        else:
+            # Overnight window - end is next day
+            next_window_end = datetime.combine(next_window_start.date() + timedelta(days=1), window_end_time, tzinfo=timezone.utc)
+        
+        _LOGGER.debug(
+            "Next charge window: %s to %s (current time: %s)",
+            next_window_start.isoformat(),
+            next_window_end.isoformat(),
+            now.isoformat(),
+        )
+        
+        # Filter periods to those within the next charge window
+        filtered_periods = []
+        for period in periods:
+            try:
+                from_time = datetime.fromisoformat(period["from"].replace("Z", "+00:00"))
+                to_time = datetime.fromisoformat(period["to"].replace("Z", "+00:00"))
+                
+                # Check if period overlaps with next charge window
+                if to_time < next_window_start or from_time > next_window_end:
+                    continue
+                
+                # Trim period to window boundaries
+                actual_start = max(from_time, next_window_start)
+                actual_end = min(to_time, next_window_end)
+                
+                if actual_start >= actual_end:
+                    continue
+                
+                ci_value = period.get("intensity", {}).get("forecast", 0)
+                filtered_periods.append({
+                    "from": actual_start,
+                    "to": actual_end,
+                    "ci": ci_value,
+                })
+            except (ValueError, KeyError) as err:
+                _LOGGER.debug("Skipping invalid period: %s", err)
+                continue
+        
+        if not filtered_periods:
+            _LOGGER.info("No charge periods found in next window %s - %s", charge_window_start, charge_window_end)
+            return []
+        
+        # Sort by CI ascending (lowest first for charging - greenest power)
+        filtered_periods.sort(key=lambda p: p["ci"])
+        
+        # Allocate energy to lowest CI periods
+        plan = []
+        remaining_energy = energy_needed_kwh
+        
+        for period in filtered_periods:
+            if remaining_energy <= 0:
+                break
+            
+            # Calculate period duration
+            period_duration_hours = (period["to"] - period["from"]).total_seconds() / 3600
+            
+            # Energy that can be charged in this period
+            period_energy = charge_power_kw * period_duration_hours
+            
+            # Allocate energy (limited by what's needed)
+            allocated_energy = min(period_energy, remaining_energy)
+            
+            plan.append({
+                "period_start": period["from"].isoformat(),
+                "period_end": period["to"].isoformat(),
+                "energy_kwh": round(allocated_energy, 3),
+                "ci_value": period["ci"],
+            })
+            
+            remaining_energy -= allocated_energy
+        
+        _LOGGER.info(
+            "Generated next charge session plan: %d periods, %.3f kWh total (needed %.3f kWh)",
+            len(plan),
+            sum(p["energy_kwh"] for p in plan),
+            energy_needed_kwh,
+        )
+        
+        return plan
+
     def _generate_charge_plan_today(
         self,
         periods: list[dict],
@@ -917,9 +1097,8 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                             sum(p.get("energy_kwh", 0) for p in discharge_plan_tomorrow),
                         )
 
-        # Generate charge plans if charge planning is enabled
-        charge_plan_today = []
-        charge_plan_tomorrow = []
+        # Generate charge plan for next charge session if charge planning is enabled
+        next_charge_session = []
         enable_charge_planning = config_data.get(CONF_ENABLE_CHARGE_PLANNING, False)
         
         # Fetch CI data for charge planning if needed
@@ -937,43 +1116,24 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
             if ci_data:
                 periods = ci_data.get("data", [])
                 if periods:
-                    discharge_cutoff_soc_sensor = config_data.get(CONF_DISCHARGE_CUTOFF_SOC)
-                    discharge_cutoff_soc_value = self._get_sensor_value(discharge_cutoff_soc_sensor) if discharge_cutoff_soc_sensor else 100
-                    
                     charge_power_kw = config_data.get(CONF_CHARGE_POWER_KW, DEFAULT_CHARGE_POWER_KW)
                     charge_window_start = config_data.get(CONF_CHARGE_WINDOW_START, DEFAULT_CHARGE_WINDOW_START)
                     charge_window_end = config_data.get(CONF_CHARGE_WINDOW_END, DEFAULT_CHARGE_WINDOW_END)
                     battery_capacity_kwh = config_data.get(CONF_BATTERY_CAPACITY_KWH, DEFAULT_BATTERY_CAPACITY_KWH)
                     
-                    # Generate charge plan for today
-                    charge_plan_today = self._generate_charge_plan_today(
+                    # Generate charge plan for next charge session
+                    next_charge_session = self._generate_next_charge_session(
                         periods,
                         current_soc,
-                        discharge_cutoff_soc_value,
                         charge_power_kw,
                         charge_window_start,
                         charge_window_end,
                         battery_capacity_kwh,
                     )
                     _LOGGER.debug(
-                        "Generated today's CI charge plan: %d periods, %.3f kWh total",
-                        len(charge_plan_today),
-                        sum(p.get("energy_kwh", 0) for p in charge_plan_today),
-                    )
-                    
-                    # Generate charge plan for tomorrow
-                    charge_plan_tomorrow = self._generate_charge_plan_tomorrow(
-                        periods,
-                        discharge_cutoff_soc_value,
-                        charge_power_kw,
-                        charge_window_start,
-                        charge_window_end,
-                        battery_capacity_kwh,
-                    )
-                    _LOGGER.debug(
-                        "Generated tomorrow's CI charge plan: %d periods, %.3f kWh total",
-                        len(charge_plan_tomorrow),
-                        sum(p.get("energy_kwh", 0) for p in charge_plan_tomorrow),
+                        "Generated next charge session plan: %d periods, %.3f kWh total",
+                        len(next_charge_session),
+                        sum(p.get("energy_kwh", 0) for p in next_charge_session),
                     )
 
         # Check for auto-discharge trigger
@@ -1002,8 +1162,7 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
             ATTR_DISCHARGE_PLAN: discharge_plan_today,  # Keep backward compatibility
             ATTR_DISCHARGE_PLAN_TODAY: discharge_plan_today,
             ATTR_DISCHARGE_PLAN_TOMORROW: discharge_plan_tomorrow,
-            ATTR_CHARGE_PLAN_TODAY: charge_plan_today,
-            ATTR_CHARGE_PLAN_TOMORROW: charge_plan_tomorrow,
+            "next_charge_session": next_charge_session,
             ATTR_CURRENT_CI_VALUE: current_ci_value,
             ATTR_CURRENT_CI_INDEX: current_ci_index,
             "reserve_limit_reached": reserve_limit_reached,
