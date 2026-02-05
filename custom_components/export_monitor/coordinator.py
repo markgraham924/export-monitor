@@ -1086,6 +1086,7 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
             discharge_plan_tomorrow = []
             current_ci_value = None
             current_ci_index = None
+            discharge_power_kw = target_export / 1000  # Initialize discharge power
 
             ci_sensor = config_data.get(CONF_CI_FORECAST_SENSOR)
             enable_ci_planning = config_data.get(CONF_ENABLE_CI_PLANNING, DEFAULT_ENABLE_CI_PLANNING)
@@ -1101,8 +1102,6 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                         periods = ci_data.get("periods", [])
                         # Get current CI
                         current_ci_value, current_ci_index = self._get_current_ci_index(periods)
-                        
-                        discharge_power_kw = target_export / 1000
                         
                         # Get export window from config
                         export_window_start = config_data.get(CONF_EXPORT_WINDOW_START, DEFAULT_EXPORT_WINDOW_START)
@@ -1198,6 +1197,13 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                     discharge_power_kw,
                 )
 
+            # Check for auto-charge trigger
+            enable_auto_charge = config_data.get(CONF_ENABLE_AUTO_CHARGE, False)
+            if enable_auto_charge and next_charge_session:
+                await self._check_and_trigger_auto_charge(
+                    next_charge_session,
+                )
+
             # Record successful update
             self._stale_data_detector.record_update()
             self._circuit_breaker.record_success()
@@ -1232,35 +1238,6 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
             _LOGGER.error("Unexpected error in update: %s", err, exc_info=True)
             self._circuit_breaker.record_failure()
             raise UpdateFailed(f"Update failed with error: {err}") from err
-        # Check for auto-charge trigger
-        enable_auto_charge = config_data.get(CONF_ENABLE_AUTO_CHARGE, False)
-        if enable_auto_charge and next_charge_session:
-            await self._check_and_trigger_auto_charge(
-                next_charge_session,
-            )
-
-        return {
-            ATTR_EXPORT_HEADROOM: headroom_kwh,
-            ATTR_EXPORT_ALLOWED: export_cap_kwh,
-            ATTR_EXPORTED_TODAY: grid_feed_today,
-            ATTR_DISCHARGE_NEEDED: recommended_discharge_w,
-            ATTR_CURRENT_PV: pv_energy_today,
-            ATTR_FORECAST_PV: solcast_total_today,
-            ATTR_LAST_CALCULATION: self.hass.states.get("sensor.date_time_iso").state
-            if self.hass.states.get("sensor.date_time_iso")
-            else None,
-            ATTR_DISCHARGE_PLAN: discharge_plan_today,  # Keep backward compatibility
-            ATTR_DISCHARGE_PLAN_TODAY: discharge_plan_today,
-            ATTR_DISCHARGE_PLAN_TOMORROW: discharge_plan_tomorrow,
-            "next_charge_session": next_charge_session,
-            ATTR_CURRENT_CI_VALUE: current_ci_value,
-            ATTR_CURRENT_CI_INDEX: current_ci_index,
-            "reserve_limit_reached": reserve_limit_reached,
-            "observe_reserve_soc": observe_reserve_soc,
-            "current_soc": current_soc,
-            "min_soc": min_soc,
-            "reserve_soc_target": reserve_soc_target,
-        }
 
     @property
     def discharge_active(self) -> bool:
