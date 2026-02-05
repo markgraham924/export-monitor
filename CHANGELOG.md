@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.5] - 2026-02-05
+
+### Fixed
+- **Critical Bug Fix**: Resolved NameError from unreachable code and conditionally-defined variables (#14)
+  - Fixed variable initialization issues in error handling paths
+  - Ensures robust error recovery in edge cases
+
 ## [1.10.0] - 2026-02-04 - **Production Readiness Update**
 
 ### Added - Safety & Reliability
