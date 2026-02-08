@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.11] - 2026-02-08
+
+### Added
+- **Current slot sensors**: Headroom, exported energy, target energy, progress, and time remaining for the active plan window.
+- **Diagnostics**: Auto-control summary, last auto action, service call stats, and window parse error counts.
+- **Control**: Reset Auto Stats button for clearing auto-control diagnostics.
+
+### Changed
+- **Charge automation**: Auto-charge now enforces window targets and modulates charge power to stay on plan, mirroring discharge behavior.
+
 ## [1.9.10] - 2026-02-08
 
 ### Fixed

@@ -46,6 +46,11 @@ async def async_setup_entry(
 
     sensors = [
         ExportHeadroomSensor(coordinator, entry),
+        CurrentSlotHeadroomSensor(coordinator, entry),
+        CurrentSlotExportedSensor(coordinator, entry),
+        CurrentSlotTargetSensor(coordinator, entry),
+        CurrentSlotProgressSensor(coordinator, entry),
+        CurrentSlotMinutesRemainingSensor(coordinator, entry),
         DischargeNeededSensor(coordinator, entry),
         ExportedTodaySensor(coordinator, entry),
         DischargeStatusSensor(coordinator, entry),
@@ -69,6 +74,10 @@ async def async_setup_entry(
         GenericDiagnosticSensor(coordinator, entry, "min_soc", "Minimum SOC", "mdi:battery-arrow-down", PERCENTAGE, SensorDeviceClass.BATTERY),
         GenericDiagnosticSensor(coordinator, entry, "observe_reserve_soc", "Observe Reserve SOC", "mdi:shield-search"),
         GenericDiagnosticSensor(coordinator, entry, "reserve_limit_reached", "Reserve Limit Reached", "mdi:shield-alert"),
+        AutoControlSummarySensor(coordinator, entry),
+        LastAutoActionSensor(coordinator, entry),
+        ServiceCallStatsSensor(coordinator, entry),
+        WindowParseErrorsSensor(coordinator, entry),
         # System health monitoring sensors
         SystemHealthSensor(coordinator, entry),
         ErrorStateSensor(coordinator, entry),
@@ -143,6 +152,136 @@ class ExportHeadroomSensor(ExportMonitorSensor):
         """Return the state of the sensor."""
         if self.coordinator.data:
             return self.coordinator.data.get(ATTR_EXPORT_HEADROOM)
+        return None
+
+
+class CurrentSlotHeadroomSensor(ExportMonitorSensor):
+    """Sensor showing remaining headroom for current plan window (kWh)."""
+
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+
+    def __init__(
+        self,
+        coordinator: ExportMonitorCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(
+            coordinator,
+            entry,
+            "current_slot_headroom",
+            "Current Slot Headroom",
+            "mdi:chart-waterfall",
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        if self.coordinator.data:
+            return self.coordinator.data.get("current_slot_headroom_kwh")
+        return None
+
+
+class CurrentSlotExportedSensor(ExportMonitorSensor):
+    """Sensor showing exported energy in the current plan window (kWh)."""
+
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+
+    def __init__(
+        self,
+        coordinator: ExportMonitorCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(
+            coordinator,
+            entry,
+            "current_slot_exported",
+            "Current Slot Exported",
+            "mdi:transmission-tower-export",
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        if self.coordinator.data:
+            return self.coordinator.data.get("current_slot_exported_kwh")
+        return None
+
+
+class CurrentSlotTargetSensor(ExportMonitorSensor):
+    """Sensor showing target energy for current plan window (kWh)."""
+
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+
+    def __init__(
+        self,
+        coordinator: ExportMonitorCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(
+            coordinator,
+            entry,
+            "current_slot_target",
+            "Current Slot Target",
+            "mdi:target",
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        if self.coordinator.data:
+            return self.coordinator.data.get("current_slot_target_kwh")
+        return None
+
+
+class CurrentSlotProgressSensor(ExportMonitorSensor):
+    """Sensor showing progress through current plan window (%)."""
+
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(
+        self,
+        coordinator: ExportMonitorCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(
+            coordinator,
+            entry,
+            "current_slot_progress",
+            "Current Slot Progress",
+            "mdi:progress-clock",
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        if self.coordinator.data:
+            return self.coordinator.data.get("current_slot_progress")
+        return None
+
+
+class CurrentSlotMinutesRemainingSensor(ExportMonitorSensor):
+    """Sensor showing minutes remaining in current plan window."""
+
+    _attr_native_unit_of_measurement = "min"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(
+        self,
+        coordinator: ExportMonitorCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(
+            coordinator,
+            entry,
+            "current_slot_minutes_remaining",
+            "Current Slot Time Remaining",
+            "mdi:timer-outline",
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        if self.coordinator.data:
+            return self.coordinator.data.get("current_slot_minutes_remaining")
         return None
 
 
@@ -560,6 +699,126 @@ class GenericDiagnosticSensor(ExportMonitorSensor):
     @property
     def native_value(self) -> Any:
         return self.coordinator.data.get(self._data_key) if self.coordinator.data else None
+
+
+class AutoControlSummarySensor(ExportMonitorSensor):
+    """Diagnostic sensor summarizing auto-control state."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: ExportMonitorCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(
+            coordinator,
+            entry,
+            "auto_control_summary",
+            "Auto Control Summary",
+            "mdi:robot",
+        )
+
+    @property
+    def native_value(self) -> str:
+        state = self.coordinator.data.get("auto_control_state") if self.coordinator.data else None
+        if not state:
+            return "Unknown"
+        auto_discharge = "on" if state.get("auto_discharge") else "off"
+        auto_charge = "on" if state.get("auto_charge") else "off"
+        return f"auto_discharge={auto_discharge}, auto_charge={auto_charge}"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        state = self.coordinator.data.get("auto_control_state") if self.coordinator.data else None
+        return state or {}
+
+
+class LastAutoActionSensor(ExportMonitorSensor):
+    """Diagnostic sensor for the last auto action."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: ExportMonitorCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(
+            coordinator,
+            entry,
+            "last_auto_action",
+            "Last Auto Action",
+            "mdi:history",
+        )
+
+    @property
+    def native_value(self) -> str:
+        data = self.coordinator.data.get("last_auto_action") if self.coordinator.data else None
+        if not data:
+            return "none"
+        return data.get("action", "none")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        data = self.coordinator.data.get("last_auto_action") if self.coordinator.data else None
+        return data or {}
+
+
+class ServiceCallStatsSensor(ExportMonitorSensor):
+    """Diagnostic sensor for service call stats."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: ExportMonitorCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(
+            coordinator,
+            entry,
+            "service_call_stats",
+            "Service Call Stats",
+            "mdi:chart-box",
+        )
+
+    @property
+    def native_value(self) -> int | None:
+        stats = self.coordinator.data.get("service_call_stats") if self.coordinator.data else None
+        if not stats:
+            return None
+        return sum(value for key, value in stats.items() if key.endswith("_fail"))
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        stats = self.coordinator.data.get("service_call_stats") if self.coordinator.data else None
+        return stats or {}
+
+
+class WindowParseErrorsSensor(ExportMonitorSensor):
+    """Diagnostic sensor for window parse errors."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: ExportMonitorCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(
+            coordinator,
+            entry,
+            "window_parse_errors",
+            "Window Parse Errors",
+            "mdi:alert-circle-outline",
+        )
+
+    @property
+    def native_value(self) -> int | None:
+        if self.coordinator.data:
+            return self.coordinator.data.get("window_parse_errors")
+        return None
 
 
 class PlanEnergySensor(ExportMonitorSensor):

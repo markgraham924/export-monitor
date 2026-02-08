@@ -28,6 +28,8 @@ from .const import (
     ATTR_LAST_CALCULATION,
     CONF_CHARGE_WINDOW_END,
     CONF_CHARGE_WINDOW_START,
+    CONF_CHARGE_BUTTON,
+    CONF_CHARGE_POWER_ENTITY,
     CONF_CHARGE_POWER_KW,
     CONF_BATTERY_CAPACITY_KWH,
     CONF_CI_FORECAST_SENSOR,
@@ -105,6 +107,23 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
         self._current_window_start_export = None  # Export value at window start
         self._current_window_target_energy = None  # Target energy for current window (kWh)
         self._last_discharge_power_kw = None  # Last applied discharge power
+        self._current_charge_window_id = None  # Track active charge window id
+        self._current_charge_window_start_soc = None  # SOC at charge window start
+        self._current_charge_window_target_energy = None  # Target energy for current charge window (kWh)
+        self._current_charge_window_end = None  # End time for current charge window
+        self._last_charge_power_kw = None  # Last applied charge power
+        self._last_auto_action: dict[str, Any] | None = None
+        self._service_call_stats = {
+            "start_discharge_success": 0,
+            "start_discharge_fail": 0,
+            "stop_discharge_success": 0,
+            "stop_discharge_fail": 0,
+            "start_charge_success": 0,
+            "start_charge_fail": 0,
+            "stop_charge_success": 0,
+            "stop_charge_fail": 0,
+        }
+        self._window_parse_errors = 0
         
         # Error handling and monitoring
         self._error_state: str | None = None
@@ -978,6 +997,9 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
         
         try:
             config_data = {**self.entry.data, **self.entry.options}
+            battery_capacity_kwh = config_data.get(
+                CONF_BATTERY_CAPACITY_KWH, DEFAULT_BATTERY_CAPACITY_KWH
+            )
 
             # Get sensor values (kWh) with appropriate types
             current_soc_sensor = config_data.get(CONF_CURRENT_SOC)
@@ -1201,11 +1223,7 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                     _LOGGER.info("Auto-stopping discharge: outside planned window")
                     self._last_auto_discharge_window = None
                     self.hass.async_create_task(
-                        self.hass.services.async_call(
-                            DOMAIN,
-                            SERVICE_STOP_DISCHARGE,
-                            {},
-                        )
+                        self._call_service_with_stats(SERVICE_STOP_DISCHARGE, "stop_discharge")
                     )
             if enable_auto_discharge and discharge_plan_today:
                 await self._check_and_trigger_auto_discharge(
@@ -1247,11 +1265,7 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                                 exported_in_window,
                             )
                             self.hass.async_create_task(
-                                self.hass.services.async_call(
-                                    DOMAIN,
-                                    SERVICE_STOP_DISCHARGE,
-                                    {},
-                                )
+                                self._call_service_with_stats(SERVICE_STOP_DISCHARGE, "stop_discharge")
                             )
                         else:
                             self.hass.async_create_task(
@@ -1264,6 +1278,41 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                                 )
                             )
 
+            current_slot_exported_kwh = None
+            current_slot_target_kwh = None
+            current_slot_headroom_kwh = None
+            current_slot_progress = None
+            current_slot_minutes_remaining = None
+            active_window = self._get_active_discharge_window(discharge_plan_today)
+            if active_window:
+                window_id, window_energy, window_end = active_window
+                if self._current_window_id != window_id:
+                    self._current_window_id = window_id
+                    self._current_window_start_export = grid_feed_today
+                    self._current_window_target_energy = window_energy
+                if (
+                    self._current_window_start_export is not None
+                    and self._current_window_target_energy is not None
+                ):
+                    current_slot_exported_kwh = max(
+                        grid_feed_today - self._current_window_start_export, 0.0
+                    )
+                    current_slot_target_kwh = self._current_window_target_energy
+                    current_slot_headroom_kwh = max(
+                        current_slot_target_kwh - current_slot_exported_kwh, 0.0
+                    )
+                    if current_slot_target_kwh > 0:
+                        current_slot_progress = round(
+                            (current_slot_exported_kwh / current_slot_target_kwh) * 100, 1
+                        )
+                window_end_utc = window_end
+                if window_end_utc.tzinfo is None:
+                    window_end_utc = window_end_utc.replace(tzinfo=timezone.utc)
+                current_slot_minutes_remaining = round(
+                    max((window_end_utc - datetime.now(timezone.utc)).total_seconds() / 60.0, 0.0),
+                    1,
+                )
+
             # Check for auto-charge trigger
             enable_auto_charge = config_data.get(CONF_ENABLE_AUTO_CHARGE, False)
             if enable_auto_charge and self._charge_active and self._last_auto_charge_window:
@@ -1271,16 +1320,53 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                     _LOGGER.info("Auto-stopping charge: outside planned window")
                     self._last_auto_charge_window = None
                     self.hass.async_create_task(
-                        self.hass.services.async_call(
-                            DOMAIN,
-                            SERVICE_STOP_CHARGE,
-                            {},
-                        )
+                        self._call_service_with_stats(SERVICE_STOP_CHARGE, "stop_charge")
                     )
             if enable_auto_charge and next_charge_session:
                 await self._check_and_trigger_auto_charge(
                     next_charge_session,
                 )
+            if enable_auto_charge:
+                desired_on = self._get_active_charge_window(next_charge_session) is not None
+                self.hass.async_create_task(
+                    self._enforce_charge_toggle(config_data, desired_on)
+                )
+            if enable_auto_charge and self._charge_active and next_charge_session and current_soc is not None:
+                active_charge_window = self._get_active_charge_window(next_charge_session)
+                if active_charge_window:
+                    window_id, window_energy, window_end = active_charge_window
+                    if self._current_charge_window_id != window_id:
+                        self._current_charge_window_id = window_id
+                        self._current_charge_window_start_soc = current_soc
+                        self._current_charge_window_target_energy = window_energy
+                        self._current_charge_window_end = window_end
+                    if (
+                        self._current_charge_window_start_soc is not None
+                        and self._current_charge_window_target_energy is not None
+                    ):
+                        soc_delta = max(current_soc - self._current_charge_window_start_soc, 0.0)
+                        energy_charged_kwh = (soc_delta / 100.0) * battery_capacity_kwh
+                        if energy_charged_kwh >= self._current_charge_window_target_energy:
+                            _LOGGER.info(
+                                "Auto-stopping charge: window target met (%.3f kWh)",
+                                energy_charged_kwh,
+                            )
+                            self.hass.async_create_task(
+                                self._call_service_with_stats(SERVICE_STOP_CHARGE, "stop_charge")
+                            )
+                        else:
+                            max_charge_power_kw = config_data.get(
+                                CONF_CHARGE_POWER_KW, DEFAULT_CHARGE_POWER_KW
+                            )
+                            self.hass.async_create_task(
+                                self._adjust_charge_power(
+                                    config_data,
+                                    energy_charged_kwh,
+                                    self._current_charge_window_target_energy,
+                                    window_end,
+                                    max_charge_power_kw,
+                                )
+                            )
 
             # Record successful update
             self._stale_data_detector.record_update()
@@ -1308,6 +1394,22 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                 "min_soc": min_soc,
                 "reserve_soc_target": reserve_soc_target,
                 "calculated_duration": calculated_duration_minutes,
+                "current_slot_headroom_kwh": current_slot_headroom_kwh,
+                "current_slot_exported_kwh": current_slot_exported_kwh,
+                "current_slot_target_kwh": current_slot_target_kwh,
+                "current_slot_progress": current_slot_progress,
+                "current_slot_minutes_remaining": current_slot_minutes_remaining,
+                "auto_control_state": {
+                    "auto_discharge": enable_auto_discharge,
+                    "auto_charge": enable_auto_charge,
+                    "discharge_active": self._discharge_active,
+                    "charge_active": self._charge_active,
+                    "active_discharge_window": self._current_window_id,
+                    "active_charge_window": self._current_charge_window_id,
+                },
+                "last_auto_action": self._last_auto_action,
+                "service_call_stats": dict(self._service_call_stats),
+                "window_parse_errors": self._window_parse_errors,
             }
         except UpdateFailed:
             # Re-raise UpdateFailed to let coordinator handle it
@@ -1370,6 +1472,47 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
         else:
             self._charge_start_time = None
             _LOGGER.info("Charge stopped")
+            self._current_charge_window_id = None
+            self._current_charge_window_start_soc = None
+            self._current_charge_window_target_energy = None
+            self._current_charge_window_end = None
+            self._last_charge_power_kw = None
+
+    def reset_auto_stats(self) -> None:
+        """Reset auto-control diagnostic counters."""
+        self._last_auto_action = None
+        for key in self._service_call_stats:
+            self._service_call_stats[key] = 0
+        self._window_parse_errors = 0
+
+    def _record_service_call(self, action: str, success: bool) -> None:
+        """Record service call success/failure counts."""
+        key = f"{action}_{'success' if success else 'fail'}"
+        if key in self._service_call_stats:
+            self._service_call_stats[key] += 1
+
+    def _set_last_auto_action(self, action: str) -> None:
+        """Record the last auto action for diagnostics."""
+        self._last_auto_action = {
+            "action": action,
+            "time": datetime.now(timezone.utc).isoformat(),
+        }
+
+    async def _call_service_with_stats(self, service: str, action: str) -> bool:
+        """Call a service and track success/failure stats."""
+        try:
+            await self.hass.services.async_call(
+                DOMAIN,
+                service,
+                {},
+            )
+            self._record_service_call(action, True)
+            self._set_last_auto_action(action)
+            return True
+        except Exception as err:
+            _LOGGER.error("Failed to call %s: %s", service, err)
+            self._record_service_call(action, False)
+            return False
 
     def set_error_state(self, error: str) -> None:
         """Set error state for monitoring."""
@@ -1504,20 +1647,18 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                     )
                     
                     # Call the discharge service
-                    try:
-                        await self.hass.services.async_call(
-                            DOMAIN,
-                            SERVICE_START_DISCHARGE,
-                        )
-                        _LOGGER.info("Auto-discharge service call executed")
-                    except Exception as err:
-                        _LOGGER.error("Failed to call discharge service: %s", err)
+                    success = await self._call_service_with_stats(
+                        SERVICE_START_DISCHARGE,
+                        "start_discharge",
+                    )
+                    if not success:
                         self.set_discharge_active(False)
                     
                     break  # Only trigger one window per update
             
             except (ValueError, TypeError) as err:
                 _LOGGER.debug("Error parsing window times: %s", err)
+                self._window_parse_errors += 1
                 continue
 
     def _is_within_discharge_window(self, discharge_plan: list[dict]) -> bool:
@@ -1540,6 +1681,7 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                 window_start = datetime.datetime.fromisoformat(window_start_str)
                 window_end = datetime.datetime.fromisoformat(window_end_str)
             except (ValueError, TypeError):
+                self._window_parse_errors += 1
                 continue
 
             if window_start.tzinfo is None:
@@ -1607,17 +1749,9 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
 
         current_on = state.state == "on"
         if desired_on and not current_on:
-            await self.hass.services.async_call(
-                DOMAIN,
-                SERVICE_START_DISCHARGE,
-                {},
-            )
+            await self._call_service_with_stats(SERVICE_START_DISCHARGE, "start_discharge")
         elif not desired_on and current_on:
-            await self.hass.services.async_call(
-                DOMAIN,
-                SERVICE_STOP_DISCHARGE,
-                {},
-            )
+            await self._call_service_with_stats(SERVICE_STOP_DISCHARGE, "stop_discharge")
 
     async def _adjust_discharge_power(
         self,
@@ -1684,6 +1818,7 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                 window_start = datetime.datetime.fromisoformat(window_start_str)
                 window_end = datetime.datetime.fromisoformat(window_end_str)
             except (ValueError, TypeError):
+                self._window_parse_errors += 1
                 continue
 
             if window_start.tzinfo is None:
@@ -1696,6 +1831,107 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                 return True
 
         return False
+
+    def _get_active_charge_window(self, charge_session: list[dict]) -> tuple[str, float, datetime] | None:
+        """Return the active charge window id, target energy, and end time."""
+        import datetime
+
+        if not charge_session:
+            return None
+
+        now = datetime.datetime.now(datetime.timezone.utc)
+
+        for window in charge_session:
+            window_start_str = window.get("period_start", "")
+            window_end_str = window.get("period_end", "")
+            window_energy = window.get("energy_kwh", 0)
+
+            if not window_start_str or not window_end_str:
+                continue
+
+            try:
+                window_start = datetime.datetime.fromisoformat(window_start_str)
+                window_end = datetime.datetime.fromisoformat(window_end_str)
+            except (ValueError, TypeError):
+                self._window_parse_errors += 1
+                continue
+
+            if window_start.tzinfo is None:
+                window_start = window_start.replace(tzinfo=datetime.timezone.utc)
+            if window_end.tzinfo is None:
+                window_end = window_end.replace(tzinfo=datetime.timezone.utc)
+
+            now_local = now.astimezone(window_start.tzinfo) if window_start.tzinfo else now
+            if window_start <= now_local <= window_end:
+                window_id = window_start_str
+                return window_id, float(window_energy or 0), window_end
+
+        return None
+
+    async def _enforce_charge_toggle(
+        self,
+        config_data: dict[str, Any],
+        desired_on: bool,
+    ) -> None:
+        """Ensure the charge toggle matches the planned state."""
+        charge_button_entity = config_data.get(CONF_CHARGE_BUTTON)
+        if not charge_button_entity:
+            return
+
+        state = self.hass.states.get(charge_button_entity)
+        if not state:
+            return
+
+        current_on = state.state == "on"
+        if desired_on and not current_on:
+            await self._call_service_with_stats(SERVICE_START_CHARGE, "start_charge")
+        elif not desired_on and current_on:
+            await self._call_service_with_stats(SERVICE_STOP_CHARGE, "stop_charge")
+
+    async def _adjust_charge_power(
+        self,
+        config_data: dict[str, Any],
+        energy_charged: float,
+        target_energy: float,
+        window_end: datetime,
+        max_charge_power_kw: float,
+    ) -> None:
+        """Adjust charge power to stay on track for the current window."""
+        now = datetime.now(timezone.utc)
+        window_end_utc = window_end
+        if window_end.tzinfo is None:
+            window_end_utc = window_end.replace(tzinfo=timezone.utc)
+
+        remaining_energy = max(target_energy - energy_charged, 0.0)
+        remaining_minutes = max((window_end_utc - now).total_seconds() / 60.0, 1.0)
+        required_power_kw = (remaining_energy / remaining_minutes) * 60.0
+        desired_power_kw = min(max_charge_power_kw, max(required_power_kw, 0.0))
+
+        if remaining_energy <= 0:
+            return
+
+        if self._last_charge_power_kw is not None:
+            if abs(self._last_charge_power_kw - desired_power_kw) < 0.05:
+                return
+
+        charge_power_entity = config_data.get(CONF_CHARGE_POWER_ENTITY)
+        if not charge_power_entity:
+            return
+
+        domain = charge_power_entity.split(".")[0]
+        success = await safe_service_call(
+            self.hass,
+            domain,
+            "set_value",
+            {
+                "entity_id": charge_power_entity,
+                "value": desired_power_kw,
+            },
+            entity_id=charge_power_entity,
+            expected_value=desired_power_kw,
+        )
+        if success:
+            self._last_charge_power_kw = desired_power_kw
 
     async def _check_and_trigger_auto_charge(
         self,
@@ -1773,18 +2009,16 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                     self.set_charge_active(True)
                     
                     # Call the charge service
-                    try:
-                        await self.hass.services.async_call(
-                            DOMAIN,
-                            SERVICE_START_CHARGE,
-                        )
-                        _LOGGER.info("Auto-charge service call executed")
-                    except Exception as err:
-                        _LOGGER.error("Failed to call charge service: %s", err)
+                    success = await self._call_service_with_stats(
+                        SERVICE_START_CHARGE,
+                        "start_charge",
+                    )
+                    if not success:
                         self.set_charge_active(False)
                     
                     break  # Only trigger one window per update
             
             except (ValueError, TypeError) as err:
                 _LOGGER.debug("Error parsing charge window times: %s", err)
+                self._window_parse_errors += 1
                 continue

@@ -29,6 +29,7 @@ async def async_setup_entry(
             StartDischargeButton(coordinator, entry),
             StopDischargeButton(coordinator, entry),
             CalculateDischargeButton(coordinator, entry),
+            ResetAutoStatsButton(coordinator, entry),
         ]
     )
 
@@ -150,3 +151,24 @@ class CalculateDischargeButton(ExportMonitorButton):
             {},
             blocking=True,
         )
+
+
+class ResetAutoStatsButton(ExportMonitorButton):
+    """Button to reset auto-control diagnostic counters."""
+
+    def __init__(
+        self,
+        coordinator: ExportMonitorCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(
+            coordinator,
+            entry,
+            "reset_auto_stats",
+            "Reset Auto Stats",
+            "mdi:restart",
+        )
+
+    async def async_press(self) -> None:
+        self.coordinator.reset_auto_stats()
+        await self.coordinator.async_request_refresh()
