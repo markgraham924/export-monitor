@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import math
 
 import voluptuous as vol
 
@@ -243,14 +244,14 @@ async def async_setup_services(
             auto_window_minutes = coordinator.get_auto_window_duration_minutes()
 
         if auto_window_minutes:
-            duration_minutes = auto_window_minutes
+            duration_minutes = float(math.ceil(auto_window_minutes))
             _LOGGER.info(
                 "Using auto window duration: %.1f minutes",
                 duration_minutes,
             )
         else:
             duration_hours = headroom / discharge_power_kw
-            duration_minutes = duration_hours * 60
+            duration_minutes = float(math.ceil(duration_hours * 60))
         
         if not auto_window_minutes:
             _LOGGER.info(
@@ -341,7 +342,7 @@ async def async_setup_services(
 
         timer_entity = "timer.alphaess_helper_force_discharging_timer"
         if hass.states.get(timer_entity):
-            total_seconds = max(int(round(duration_minutes * 60)), 1)
+            total_seconds = max(int(duration_minutes * 60), 1)
             hours = total_seconds // 3600
             minutes = (total_seconds % 3600) // 60
             seconds = total_seconds % 60

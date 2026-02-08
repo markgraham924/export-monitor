@@ -1237,11 +1237,7 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                     safety_margin,
                     discharge_power_kw,
                 )
-            if enable_auto_discharge:
-                desired_on = self._get_active_discharge_window(discharge_plan_today) is not None
-                self.hass.async_create_task(
-                    self._enforce_discharge_toggle(config_data, desired_on)
-                )
+            window_target_met = False
             if enable_auto_discharge and self._discharge_active and discharge_plan_today:
                 active_window = self._get_active_discharge_window(discharge_plan_today)
                 if active_window:
@@ -1261,6 +1257,7 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                     ):
                         exported_in_window = grid_feed_today - self._current_window_start_export
                         if exported_in_window >= self._current_window_target_energy:
+                            window_target_met = True
                             _LOGGER.info(
                                 "Auto-stopping discharge: window target met (%.3f kWh)",
                                 exported_in_window,
@@ -1278,6 +1275,12 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                                     discharge_power_kw,
                                 )
                             )
+            if enable_auto_discharge:
+                active_window = self._get_active_discharge_window(discharge_plan_today)
+                desired_on = active_window is not None and not window_target_met
+                self.hass.async_create_task(
+                    self._enforce_discharge_toggle(config_data, desired_on)
+                )
 
             current_slot_exported_kwh = None
             current_slot_target_kwh = None
@@ -1327,11 +1330,7 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                 await self._check_and_trigger_auto_charge(
                     next_charge_session,
                 )
-            if enable_auto_charge:
-                desired_on = self._get_active_charge_window(next_charge_session) is not None
-                self.hass.async_create_task(
-                    self._enforce_charge_toggle(config_data, desired_on)
-                )
+            charge_window_target_met = False
             if enable_auto_charge and self._charge_active and next_charge_session and current_soc is not None:
                 active_charge_window = self._get_active_charge_window(next_charge_session)
                 if active_charge_window:
@@ -1348,6 +1347,7 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                         soc_delta = max(current_soc - self._current_charge_window_start_soc, 0.0)
                         energy_charged_kwh = (soc_delta / 100.0) * battery_capacity_kwh
                         if energy_charged_kwh >= self._current_charge_window_target_energy:
+                            charge_window_target_met = True
                             _LOGGER.info(
                                 "Auto-stopping charge: window target met (%.3f kWh)",
                                 energy_charged_kwh,
@@ -1368,6 +1368,12 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                                     max_charge_power_kw,
                                 )
                             )
+            if enable_auto_charge:
+                active_charge_window = self._get_active_charge_window(next_charge_session)
+                desired_on = active_charge_window is not None and not charge_window_target_met
+                self.hass.async_create_task(
+                    self._enforce_charge_toggle(config_data, desired_on)
+                )
 
             # Record successful update
             self._stale_data_detector.record_update()
@@ -1652,7 +1658,7 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                     # Mark discharge as active
                     self.set_discharge_active(
                         True,
-                        grid_export=0.0,  # Will be updated by button
+                        grid_export=grid_feed_today,
                         target_energy=window_energy,
                     )
                     
