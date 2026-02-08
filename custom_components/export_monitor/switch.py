@@ -17,6 +17,8 @@ from .const import (
     DEFAULT_ENABLE_AUTO_DISCHARGE,
     DEFAULT_ENABLE_AUTO_CHARGE,
     DOMAIN,
+    SERVICE_STOP_CHARGE,
+    SERVICE_STOP_DISCHARGE,
 )
 from .coordinator import ExportMonitorCoordinator
 
@@ -104,6 +106,16 @@ class EnableAutoDischargeSwitch(ExportMonitorSwitch):
             "mdi:battery-auto",
         )
 
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Turn off auto-discharge and stop discharge."""
+        await super().async_turn_off(**kwargs)
+        await self.hass.services.async_call(
+            DOMAIN,
+            SERVICE_STOP_DISCHARGE,
+            {},
+            blocking=True,
+        )
+
 
 class EnableAutoChargeSwitch(ExportMonitorSwitch):
     """Switch to enable/disable auto-charge."""
@@ -120,4 +132,14 @@ class EnableAutoChargeSwitch(ExportMonitorSwitch):
             CONF_ENABLE_AUTO_CHARGE,
             "Enable Auto-Charge",
             "mdi:battery-charging-wireless",
+        )
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Turn off auto-charge and stop charging."""
+        await super().async_turn_off(**kwargs)
+        await self.hass.services.async_call(
+            DOMAIN,
+            SERVICE_STOP_CHARGE,
+            {},
+            blocking=True,
         )
