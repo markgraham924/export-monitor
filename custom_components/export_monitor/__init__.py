@@ -330,10 +330,10 @@ async def async_setup_services(
                 service,
                 {
                     "entity_id": duration_entity,
-                    "value": duration_minutes,
+                    "value": float(math.ceil(duration_minutes)),
                 },
                 entity_id=duration_entity,
-                expected_value=duration_minutes,
+                expected_value=float(math.ceil(duration_minutes)),
             )
             if success:
                 _LOGGER.info("Set discharge duration to %.1f minutes", duration_minutes)

@@ -108,11 +108,13 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
         self._current_window_target_energy = None  # Target energy for current window (kWh)
         self._last_discharge_power_kw = None  # Last applied discharge power
         self._auto_window_duration_minutes = None  # Planned window duration for auto discharge
+        self._last_discharge_power_adjust = None  # Last discharge power adjust time
         self._current_charge_window_id = None  # Track active charge window id
         self._current_charge_window_start_soc = None  # SOC at charge window start
         self._current_charge_window_target_energy = None  # Target energy for current charge window (kWh)
         self._current_charge_window_end = None  # End time for current charge window
         self._last_charge_power_kw = None  # Last applied charge power
+        self._last_charge_power_adjust = None  # Last charge power adjust time
         self._last_auto_action: dict[str, Any] | None = None
         self._service_call_stats = {
             "start_discharge_success": 0,
@@ -1460,6 +1462,7 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
             self._current_window_target_energy = None
             self._last_discharge_power_kw = None
             self._auto_window_duration_minutes = None
+            self._last_discharge_power_adjust = None
 
     @property
     def charge_active(self) -> bool:
@@ -1485,6 +1488,7 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
             self._current_charge_window_target_energy = None
             self._current_charge_window_end = None
             self._last_charge_power_kw = None
+            self._last_charge_power_adjust = None
 
     def reset_auto_stats(self) -> None:
         """Reset auto-control diagnostic counters."""
@@ -1779,16 +1783,27 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
     ) -> None:
         """Adjust discharge power to stay on track for the current window."""
         now = datetime.now(timezone.utc)
+        if self._last_discharge_power_adjust is not None:
+            if (now - self._last_discharge_power_adjust).total_seconds() < 20:
+                return
         window_end_utc = window_end
         if window_end.tzinfo is None:
             window_end_utc = window_end.replace(tzinfo=timezone.utc)
 
         remaining_energy = max(target_energy - exported_in_window, 0.0)
-        remaining_minutes = max((window_end_utc - now).total_seconds() / 60.0, 1.0)
+        remaining_minutes = (window_end_utc - now).total_seconds() / 60.0
+        if remaining_minutes <= 1.0:
+            return
+        remaining_minutes = max(remaining_minutes, 1.0)
         required_power_kw = (remaining_energy / remaining_minutes) * 60.0
         desired_power_kw = min(max_discharge_power_kw, max(required_power_kw, 0.0))
+        desired_power_kw = round(desired_power_kw, 2)
 
         if remaining_energy <= 0:
+            return
+
+        if desired_power_kw < 0.1:
+            await self._call_service_with_stats(SERVICE_STOP_DISCHARGE, "stop_discharge")
             return
 
         if self._last_discharge_power_kw is not None:
@@ -1813,6 +1828,7 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
         )
         if success:
             self._last_discharge_power_kw = desired_power_kw
+            self._last_discharge_power_adjust = now
 
     def _is_within_charge_window(self, charge_session: list[dict]) -> bool:
         """Check if current time is within any charge plan window."""
@@ -1914,16 +1930,27 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
     ) -> None:
         """Adjust charge power to stay on track for the current window."""
         now = datetime.now(timezone.utc)
+        if self._last_charge_power_adjust is not None:
+            if (now - self._last_charge_power_adjust).total_seconds() < 20:
+                return
         window_end_utc = window_end
         if window_end.tzinfo is None:
             window_end_utc = window_end.replace(tzinfo=timezone.utc)
 
         remaining_energy = max(target_energy - energy_charged, 0.0)
-        remaining_minutes = max((window_end_utc - now).total_seconds() / 60.0, 1.0)
+        remaining_minutes = (window_end_utc - now).total_seconds() / 60.0
+        if remaining_minutes <= 1.0:
+            return
+        remaining_minutes = max(remaining_minutes, 1.0)
         required_power_kw = (remaining_energy / remaining_minutes) * 60.0
         desired_power_kw = min(max_charge_power_kw, max(required_power_kw, 0.0))
+        desired_power_kw = round(desired_power_kw, 2)
 
         if remaining_energy <= 0:
+            return
+
+        if desired_power_kw < 0.1:
+            await self._call_service_with_stats(SERVICE_STOP_CHARGE, "stop_charge")
             return
 
         if self._last_charge_power_kw is not None:
@@ -1948,6 +1975,7 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
         )
         if success:
             self._last_charge_power_kw = desired_power_kw
+            self._last_charge_power_adjust = now
 
     async def _check_and_trigger_auto_charge(
         self,
