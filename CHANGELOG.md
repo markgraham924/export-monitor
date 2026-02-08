@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.7] - 2026-02-08
+
+### Fixed
+- **Timezone-aware window handling**: Use a UTC-aware `now`, normalize window datetimes, and compute a localized `now` so windows with timezone-aware bounds compare reliably and trigger in the right timezone.
+- **Window key compatibility**: Accept `from`/`to` as fallbacks for `period_start`/`period_end` when parsing plan windows to support alternate payload shapes.
+
 ## [1.9.6] - 2026-02-08
 
 ### Fixed
