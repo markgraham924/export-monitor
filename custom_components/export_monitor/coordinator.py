@@ -1357,7 +1357,7 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
         if not discharge_plan or len(discharge_plan) == 0:
             return
         
-        now = datetime.datetime.now()
+        now = datetime.datetime.now(datetime.timezone.utc)
         today_str = now.strftime("%Y-%m-%d")
         
         # Reset auto-discharge window tracking at midnight
@@ -1366,8 +1366,8 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
         
         # Check each window in the plan
         for window in discharge_plan:
-            window_start_str = window.get("period_start", "")
-            window_end_str = window.get("period_end", "")
+            window_start_str = window.get("period_start") or window.get("from", "")
+            window_end_str = window.get("period_end") or window.get("to", "")
             window_energy = window.get("energy_kwh", 0)
             
             if not window_start_str:
@@ -1378,6 +1378,14 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                 window_start = datetime.datetime.fromisoformat(window_start_str)
                 window_end = datetime.datetime.fromisoformat(window_end_str)
                 
+                # Normalize timezone awareness for safe comparisons
+                if window_start.tzinfo is None:
+                    window_start = window_start.replace(tzinfo=datetime.timezone.utc)
+                if window_end.tzinfo is None:
+                    window_end = window_end.replace(tzinfo=datetime.timezone.utc)
+                
+                now_local = now.astimezone(window_start.tzinfo) if window_start.tzinfo else now
+                
                 # Create a window identifier for tracking
                 window_id = f"{today_str}_{window_start_str}"
                 
@@ -1386,7 +1394,7 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                     continue
                 
                 # Check if we're within the window start +/- 5 minutes
-                time_until_start = (window_start - now).total_seconds() / 60
+                time_until_start = (window_start - now_local).total_seconds() / 60
                 
                 # Trigger if we're within 5 minutes before start or already in the window
                 if -5 <= time_until_start <= 0 and not self._discharge_active:
