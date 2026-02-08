@@ -14,6 +14,10 @@ _LOGGER = logging.getLogger(__name__)
 # Service call timeout (seconds)
 SERVICE_CALL_TIMEOUT = 5.0
 
+# State verification polling settings
+STATE_VERIFICATION_POLL_INTERVAL = 0.2  # Check every 200ms
+STATE_VERIFICATION_MAX_WAIT = 3.0  # Maximum time to wait for state update
+
 # Sensor value ranges for validation
 SENSOR_RANGES = {
     "soc": (0.0, 100.0),  # Battery SOC in %
@@ -130,54 +134,78 @@ async def safe_service_call(
 
         # If entity_id provided, verify state changed
         if entity_id and expected_value is not None:
-            # Give entity a moment to update
-            await asyncio.sleep(0.1)
-            
-            state = hass.states.get(entity_id)
-            if state is None:
-                _LOGGER.error("Entity %s not found after service call", entity_id)
-                return False
-            
-            # Unknown or unavailable states are treated as verification failures for critical operations
-            if state.state in (STATE_UNKNOWN, STATE_UNAVAILABLE):
-                _LOGGER.error(
-                    "Entity %s state is %s after service call; cannot verify expected value %s",
-                    entity_id,
-                    state.state,
-                    expected_value,
-                )
-                return False
-            
-            # Convert expected_value to string for comparison
+            # Poll for state update with configurable retry logic
+            # Treat UNKNOWN/UNAVAILABLE as "not yet updated" during retry window
+            poll_start = asyncio.get_running_loop().time()
             expected_str = str(expected_value)
+            last_state = None
             
-            # Direct string match: treat as verified success
-            if state.state == expected_str:
-                return True
-            
-            # Allow some tolerance for float comparisons when direct string match fails
-            try:
-                state_val = float(state.state)
-                expected_val = float(expected_value)
-                if abs(state_val - expected_val) > 0.01:
-                    _LOGGER.error(
-                        "Entity %s state mismatch after service call: got %s, expected %s",
-                        entity_id,
-                        state.state,
-                        expected_str,
-                    )
+            while True:
+                elapsed = asyncio.get_running_loop().time() - poll_start
+                
+                # Check if we've exceeded the maximum wait time
+                if elapsed > STATE_VERIFICATION_MAX_WAIT:
+                    if last_state and last_state.state in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+                        _LOGGER.error(
+                            "Entity %s state still %s after %.1fs; cannot verify expected value %s",
+                            entity_id,
+                            last_state.state,
+                            elapsed,
+                            expected_value,
+                        )
+                    else:
+                        _LOGGER.error(
+                            "Entity %s state verification timeout after %.1fs: got %s, expected %s",
+                            entity_id,
+                            elapsed,
+                            last_state.state if last_state else "None",
+                            expected_str,
+                        )
                     return False
                 
-                # Float comparison within tolerance: treat as success
-                return True
-            except (ValueError, TypeError):
-                _LOGGER.warning(
-                    "Entity %s state differs and cannot be compared numerically: got %s, expected %s",
-                    entity_id,
-                    state.state,
-                    expected_str,
-                )
-                return False
+                state = hass.states.get(entity_id)
+                last_state = state
+                
+                if state is None:
+                    _LOGGER.warning("Entity %s not found, retrying...", entity_id)
+                    await asyncio.sleep(STATE_VERIFICATION_POLL_INTERVAL)
+                    continue
+                
+                # If state is unknown or unavailable, continue polling (integration may be updating)
+                if state.state in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+                    await asyncio.sleep(STATE_VERIFICATION_POLL_INTERVAL)
+                    continue
+                
+                # Check if state matches expected value (direct string match)
+                if state.state == expected_str:
+                    _LOGGER.debug(
+                        "Entity %s verified after %.1fs: %s",
+                        entity_id,
+                        elapsed,
+                        state.state,
+                    )
+                    return True
+                
+                # Try numeric comparison with tolerance for float values
+                try:
+                    state_val = float(state.state)
+                    expected_val = float(expected_value)
+                    if abs(state_val - expected_val) <= 0.01:
+                        _LOGGER.debug(
+                            "Entity %s verified (numeric) after %.1fs: %s ≈ %s",
+                            entity_id,
+                            elapsed,
+                            state.state,
+                            expected_str,
+                        )
+                        return True
+                except (ValueError, TypeError):
+                    pass  # Not a numeric value, continue with string comparison
+                
+                # State doesn't match, but it's a valid state
+                # This could mean the integration responded but with wrong value
+                # Continue polling in case it's still updating
+                await asyncio.sleep(STATE_VERIFICATION_POLL_INTERVAL)
 
         return True
 

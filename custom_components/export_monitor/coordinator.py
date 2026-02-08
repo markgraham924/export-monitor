@@ -1229,6 +1229,7 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                 "current_soc": current_soc,
                 "min_soc": min_soc,
                 "reserve_soc_target": reserve_soc_target,
+                "calculated_duration": calculated_duration_minutes,
             }
         except UpdateFailed:
             # Re-raise UpdateFailed to let coordinator handle it
