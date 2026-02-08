@@ -130,8 +130,8 @@ async def safe_service_call(
 
         # If entity_id provided, verify state changed
         if entity_id and expected_value is not None:
-            # Give entity a moment to update
-            await asyncio.sleep(0.1)
+            # Give entity a moment to update (longer wait for slow integrations like Alpha ESS)
+            await asyncio.sleep(1.0)
             
             state = hass.states.get(entity_id)
             if state is None:
