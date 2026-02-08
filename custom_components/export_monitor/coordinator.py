@@ -107,6 +107,7 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
         self._current_window_start_export = None  # Export value at window start
         self._current_window_target_energy = None  # Target energy for current window (kWh)
         self._last_discharge_power_kw = None  # Last applied discharge power
+        self._auto_window_duration_minutes = None  # Planned window duration for auto discharge
         self._current_charge_window_id = None  # Track active charge window id
         self._current_charge_window_start_soc = None  # SOC at charge window start
         self._current_charge_window_target_energy = None  # Target energy for current charge window (kWh)
@@ -1452,6 +1453,7 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
             self._current_window_start_export = None
             self._current_window_target_energy = None
             self._last_discharge_power_kw = None
+            self._auto_window_duration_minutes = None
 
     @property
     def charge_active(self) -> bool:
@@ -1513,6 +1515,10 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
             _LOGGER.error("Failed to call %s: %s", service, err)
             self._record_service_call(action, False)
             return False
+
+    def get_auto_window_duration_minutes(self) -> float | None:
+        """Return the auto-discharge window duration in minutes if available."""
+        return self._auto_window_duration_minutes
 
     def set_error_state(self, error: str) -> None:
         """Set error state for monitoring."""
@@ -1638,6 +1644,10 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                     self._current_window_id = window_id
                     self._current_window_start_export = grid_feed_today
                     self._current_window_target_energy = window_energy
+                    self._auto_window_duration_minutes = max(
+                        (window_end - window_start).total_seconds() / 60.0,
+                        1.0,
+                    )
                     
                     # Mark discharge as active
                     self.set_discharge_active(

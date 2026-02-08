@@ -17,6 +17,7 @@ from .const import (
     CONF_DISCHARGE_BUTTON,
     CONF_DISCHARGE_CUTOFF_SOC,
     CONF_DISCHARGE_POWER,
+    CONF_ENABLE_AUTO_DISCHARGE,
     CONF_CHARGE_BUTTON,
     CONF_CHARGE_POWER_ENTITY,
     CONF_CHARGE_DURATION,
@@ -237,15 +238,27 @@ async def async_setup_services(
         discharge_power_kw = target_export_w / 1000
 
         # Calculate duration: time (hours) = energy (kWh) / power (kW)
-        duration_hours = headroom / discharge_power_kw
-        duration_minutes = duration_hours * 60
+        auto_window_minutes = None
+        if config_data.get(CONF_ENABLE_AUTO_DISCHARGE, False):
+            auto_window_minutes = coordinator.get_auto_window_duration_minutes()
+
+        if auto_window_minutes:
+            duration_minutes = auto_window_minutes
+            _LOGGER.info(
+                "Using auto window duration: %.1f minutes",
+                duration_minutes,
+            )
+        else:
+            duration_hours = headroom / discharge_power_kw
+            duration_minutes = duration_hours * 60
         
-        _LOGGER.info(
-            "Calculated discharge duration: %.1f minutes (headroom: %.3f kWh ÷ power: %.3f kW)",
-            duration_minutes,
-            headroom,
-            discharge_power_kw,
-        )
+        if not auto_window_minutes:
+            _LOGGER.info(
+                "Calculated discharge duration: %.1f minutes (headroom: %.3f kWh ÷ power: %.3f kW)",
+                duration_minutes,
+                headroom,
+                discharge_power_kw,
+            )
 
         # Set discharge power to match target export power (in kW) with safe call
         discharge_power_entity = config_data[CONF_DISCHARGE_POWER]
@@ -325,6 +338,23 @@ async def async_setup_services(
                 _LOGGER.info("Set discharge duration to %.1f minutes", duration_minutes)
             else:
                 _LOGGER.warning("Failed to set discharge duration, continuing anyway")
+
+        timer_entity = "timer.alphaess_helper_force_discharging_timer"
+        if hass.states.get(timer_entity):
+            total_seconds = max(int(round(duration_minutes * 60)), 1)
+            hours = total_seconds // 3600
+            minutes = (total_seconds % 3600) // 60
+            seconds = total_seconds % 60
+            duration_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+            await hass.services.async_call(
+                "timer",
+                "start",
+                {
+                    "entity_id": timer_entity,
+                    "duration": duration_str,
+                },
+                blocking=True,
+            )
 
         # Enable discharge button
         discharge_button_entity = config_data[CONF_DISCHARGE_BUTTON]
