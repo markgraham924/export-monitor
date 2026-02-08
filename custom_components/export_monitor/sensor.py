@@ -757,7 +757,11 @@ class LastAutoActionSensor(ExportMonitorSensor):
         data = self.coordinator.data.get("last_auto_action") if self.coordinator.data else None
         if not data:
             return "none"
-        return data.get("action", "none")
+        action = data.get("action", "none")
+        reason = data.get("reason")
+        if reason:
+            return f"{action} ({reason})"
+        return action
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

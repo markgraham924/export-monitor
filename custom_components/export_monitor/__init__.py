@@ -337,6 +337,16 @@ async def async_setup_services(
             )
             if success:
                 _LOGGER.info("Set discharge duration to %.1f minutes", duration_minutes)
+                coordinator._set_last_auto_action(
+                    "set_discharge_duration",
+                    {
+                        "reason": "auto_window_duration"
+                        if auto_window_minutes
+                        else "calculated_duration",
+                        "target_entity": duration_entity,
+                        "value": float(math.ceil(duration_minutes)),
+                    },
+                )
             else:
                 _LOGGER.warning("Failed to set discharge duration, continuing anyway")
 
@@ -355,6 +365,16 @@ async def async_setup_services(
                     "duration": duration_str,
                 },
                 blocking=True,
+            )
+            coordinator._set_last_auto_action(
+                "set_discharge_timer",
+                {
+                    "reason": "auto_window_duration"
+                    if auto_window_minutes
+                    else "calculated_duration",
+                    "target_entity": timer_entity,
+                    "value": duration_str,
+                },
             )
 
         # Enable discharge button
