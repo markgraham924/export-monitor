@@ -136,12 +136,12 @@ async def safe_service_call(
         if entity_id and expected_value is not None:
             # Poll for state update with configurable retry logic
             # Treat UNKNOWN/UNAVAILABLE as "not yet updated" during retry window
-            poll_start = asyncio.get_event_loop().time()
+            poll_start = asyncio.get_running_loop().time()
             expected_str = str(expected_value)
             last_state = None
             
             while True:
-                elapsed = asyncio.get_event_loop().time() - poll_start
+                elapsed = asyncio.get_running_loop().time() - poll_start
                 
                 # Check if we've exceeded the maximum wait time
                 if elapsed > STATE_VERIFICATION_MAX_WAIT:
