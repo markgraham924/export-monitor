@@ -33,6 +33,7 @@ from .const import (
     CONF_CI_FORECAST_SENSOR,
     CONF_CURRENT_SOC,
     CONF_DISCHARGE_CUTOFF_SOC,
+    CONF_DISCHARGE_BUTTON,
     CONF_DISCHARGE_POWER,
     CONF_ENABLE_AUTO_DISCHARGE,
     CONF_ENABLE_AUTO_CHARGE,
@@ -1217,6 +1218,11 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                     safety_margin,
                     discharge_power_kw,
                 )
+            if enable_auto_discharge:
+                desired_on = self._get_active_discharge_window(discharge_plan_today) is not None
+                self.hass.async_create_task(
+                    self._enforce_discharge_toggle(config_data, desired_on)
+                )
             if enable_auto_discharge and self._discharge_active and discharge_plan_today:
                 active_window = self._get_active_discharge_window(discharge_plan_today)
                 if active_window:
@@ -1584,6 +1590,34 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                 return window_id, float(window_energy or 0), window_end
 
         return None
+
+    async def _enforce_discharge_toggle(
+        self,
+        config_data: dict[str, Any],
+        desired_on: bool,
+    ) -> None:
+        """Ensure the discharge toggle matches the planned state."""
+        discharge_button_entity = config_data.get(CONF_DISCHARGE_BUTTON)
+        if not discharge_button_entity:
+            return
+
+        state = self.hass.states.get(discharge_button_entity)
+        if not state:
+            return
+
+        current_on = state.state == "on"
+        if desired_on and not current_on:
+            await self.hass.services.async_call(
+                DOMAIN,
+                SERVICE_START_DISCHARGE,
+                {},
+            )
+        elif not desired_on and current_on:
+            await self.hass.services.async_call(
+                DOMAIN,
+                SERVICE_STOP_DISCHARGE,
+                {},
+            )
 
     async def _adjust_discharge_power(
         self,
