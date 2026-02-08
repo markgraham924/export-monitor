@@ -309,7 +309,7 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                     intensity_forecast = period.get("intensity", {}).get("forecast", 0)
                     intensity_index = period.get("intensity", {}).get("index", "unknown")
                     
-                    # Adjust from_time if it's before now
+                    # Adjust for remaining time but keep display aligned to slot start
                     effective_from = max(from_time, now)
                     
                     # Check if period overlaps with export window
@@ -318,7 +318,7 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                     
                     if from_time_local <= window_end_time and to_time_local >= window_start_time:
                         future_periods.append({
-                            "from": effective_from,
+                            "from": from_time,
                             "to": to_time,
                             "duration_minutes": (to_time - effective_from).total_seconds() / 60,
                             "ci_value": intensity_forecast,
@@ -326,6 +326,7 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                         })
             except (ValueError, KeyError) as err:
                 _LOGGER.debug("Error parsing CI period: %s", err)
+                self._window_parse_errors += 1
                 continue
 
         # Sort by CI value (highest first - we want to export during high CI periods)
@@ -488,6 +489,7 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
 
                 # Only consider future periods within export window
                 if to_time > now:
+                    effective_from = max(from_time, now)
                     from_time_local = from_time.astimezone().time()
                     to_time_local = to_time.astimezone().time()
                     
@@ -497,13 +499,14 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                             {
                                 "from": from_time,
                                 "to": to_time,
-                                "duration_minutes": (to_time - from_time).total_seconds() / 60,
+                                "duration_minutes": (to_time - effective_from).total_seconds() / 60,
                                 "ci_value": intensity_forecast,
                                 "ci_index": intensity_index,
                             }
                         )
             except (ValueError, KeyError) as err:
                 _LOGGER.debug("Error parsing CI period: %s", err)
+                self._window_parse_errors += 1
                 continue
 
         # Sort by CI value (highest first) - prioritize high CI periods
@@ -1570,6 +1573,10 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
     def get_auto_window_duration_minutes(self) -> float | None:
         """Return the auto-discharge window duration in minutes if available."""
         return self._auto_window_duration_minutes
+
+    def get_auto_window_target_energy(self) -> float | None:
+        """Return the auto-discharge window target energy in kWh if available."""
+        return self._current_window_target_energy
 
     def set_error_state(self, error: str) -> None:
         """Set error state for monitoring."""

@@ -238,13 +238,20 @@ async def async_setup_services(
 
         discharge_power_kw = target_export_w / 1000
 
-        # Calculate duration: time (hours) = energy (kWh) / power (kW)
+        # Calculate duration: prefer window slot duration when auto-discharge is active
         auto_window_minutes = None
+        auto_window_energy = None
         if config_data.get(CONF_ENABLE_AUTO_DISCHARGE, False):
             auto_window_minutes = coordinator.get_auto_window_duration_minutes()
+            auto_window_energy = coordinator.get_auto_window_target_energy()
 
         if auto_window_minutes:
-            duration_minutes = float(math.ceil(auto_window_minutes))
+            slot_minutes = float(math.ceil(auto_window_minutes))
+            if auto_window_energy is not None and auto_window_energy > 0:
+                required_minutes = (auto_window_energy / discharge_power_kw) * 60
+                duration_minutes = float(math.ceil(min(slot_minutes, required_minutes)))
+            else:
+                duration_minutes = slot_minutes
             _LOGGER.info(
                 "Using auto window duration: %.1f minutes",
                 duration_minutes,
@@ -264,18 +271,29 @@ async def async_setup_services(
         # Set discharge power to match target export power (in kW) with safe call
         discharge_power_entity = config_data[CONF_DISCHARGE_POWER]
         domain, service = _get_domain_and_service(discharge_power_entity, "set_value")
-        
-        success = await safe_service_call(
-            hass,
-            domain,
-            service,
-            {
-                "entity_id": discharge_power_entity,
-                "value": discharge_power_kw,
-            },
-            entity_id=discharge_power_entity,
-            expected_value=discharge_power_kw,
-        )
+
+        current_power_state = hass.states.get(discharge_power_entity)
+        current_power_val = None
+        if current_power_state and current_power_state.state not in ("unknown", "unavailable"):
+            try:
+                current_power_val = float(current_power_state.state)
+            except (ValueError, TypeError):
+                current_power_val = None
+
+        if current_power_val is None or abs(current_power_val - discharge_power_kw) > 0.01:
+            success = await safe_service_call(
+                hass,
+                domain,
+                service,
+                {
+                    "entity_id": discharge_power_entity,
+                    "value": discharge_power_kw,
+                },
+                entity_id=discharge_power_entity,
+                expected_value=discharge_power_kw,
+            )
+        else:
+            success = True
         
         if not success:
             _LOGGER.error("Failed to set discharge power, aborting start discharge")
@@ -293,17 +311,28 @@ async def async_setup_services(
         cutoff_soc_entity = "input_number.alphaess_helper_force_discharging_cutoff_soc"
         if hass.states.get(cutoff_soc_entity):
             domain, service = _get_domain_and_service(cutoff_soc_entity, "set_value")
-            success = await safe_service_call(
-                hass,
-                domain,
-                service,
-                {
-                    "entity_id": cutoff_soc_entity,
-                    "value": min_soc,
-                },
-                entity_id=cutoff_soc_entity,
-                expected_value=min_soc,
-            )
+            current_cutoff_state = hass.states.get(cutoff_soc_entity)
+            current_cutoff_val = None
+            if current_cutoff_state and current_cutoff_state.state not in ("unknown", "unavailable"):
+                try:
+                    current_cutoff_val = float(current_cutoff_state.state)
+                except (ValueError, TypeError):
+                    current_cutoff_val = None
+
+            if current_cutoff_val is None or abs(current_cutoff_val - min_soc) > 0.01:
+                success = await safe_service_call(
+                    hass,
+                    domain,
+                    service,
+                    {
+                        "entity_id": cutoff_soc_entity,
+                        "value": min_soc,
+                    },
+                    entity_id=cutoff_soc_entity,
+                    expected_value=min_soc,
+                )
+            else:
+                success = True
             if not success:
                 _LOGGER.warning(
                     "Failed to set cutoff SOC, continuing anyway"
@@ -324,17 +353,29 @@ async def async_setup_services(
 
         if duration_entity:
             domain, service = _get_domain_and_service(duration_entity, "set_value")
-            success = await safe_service_call(
-                hass,
-                domain,
-                service,
-                {
-                    "entity_id": duration_entity,
-                    "value": float(math.ceil(duration_minutes)),
-                },
-                entity_id=duration_entity,
-                expected_value=float(math.ceil(duration_minutes)),
-            )
+            current_duration_state = hass.states.get(duration_entity)
+            current_duration_val = None
+            if current_duration_state and current_duration_state.state not in ("unknown", "unavailable"):
+                try:
+                    current_duration_val = float(current_duration_state.state)
+                except (ValueError, TypeError):
+                    current_duration_val = None
+
+            desired_duration = float(math.ceil(duration_minutes))
+            if current_duration_val is None or abs(current_duration_val - desired_duration) > 0.01:
+                success = await safe_service_call(
+                    hass,
+                    domain,
+                    service,
+                    {
+                        "entity_id": duration_entity,
+                        "value": desired_duration,
+                    },
+                    entity_id=duration_entity,
+                    expected_value=desired_duration,
+                )
+            else:
+                success = True
             if success:
                 _LOGGER.info("Set discharge duration to %.1f minutes", duration_minutes)
                 coordinator._set_last_auto_action(
@@ -344,7 +385,7 @@ async def async_setup_services(
                         if auto_window_minutes
                         else "calculated_duration",
                         "target_entity": duration_entity,
-                        "value": float(math.ceil(duration_minutes)),
+                        "value": desired_duration,
                     },
                 )
             else:
@@ -357,25 +398,28 @@ async def async_setup_services(
             minutes = (total_seconds % 3600) // 60
             seconds = total_seconds % 60
             duration_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-            await hass.services.async_call(
-                "timer",
-                "start",
-                {
-                    "entity_id": timer_entity,
-                    "duration": duration_str,
-                },
-                blocking=True,
-            )
-            coordinator._set_last_auto_action(
-                "set_discharge_timer",
-                {
-                    "reason": "auto_window_duration"
-                    if auto_window_minutes
-                    else "calculated_duration",
-                    "target_entity": timer_entity,
-                    "value": duration_str,
-                },
-            )
+            timer_state = hass.states.get(timer_entity)
+            timer_duration = timer_state.attributes.get("duration") if timer_state else None
+            if timer_duration != duration_str:
+                await hass.services.async_call(
+                    "timer",
+                    "start",
+                    {
+                        "entity_id": timer_entity,
+                        "duration": duration_str,
+                    },
+                    blocking=True,
+                )
+                coordinator._set_last_auto_action(
+                    "set_discharge_timer",
+                    {
+                        "reason": "auto_window_duration"
+                        if auto_window_minutes
+                        else "calculated_duration",
+                        "target_entity": timer_entity,
+                        "value": duration_str,
+                    },
+                )
 
         # Enable discharge button
         discharge_button_entity = config_data[CONF_DISCHARGE_BUTTON]
