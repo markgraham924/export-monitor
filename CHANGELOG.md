@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.9] - 2026-02-08
+
+### Fixed
+- **Per-window energy enforcement**: Auto-discharge now tracks exported energy within each plan window and stops when that window's energy target is reached, preventing over-export inside a half-hour slot.
+- **Real-time modulation**: Discharge power is adjusted during a window to stay on target when household load changes.
+
 ## [1.9.8] - 2026-02-08
 
 ### Fixed
