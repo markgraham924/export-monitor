@@ -192,7 +192,7 @@ class ExportMonitorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                         min=0,
-                        max=10000,
+                        max=5000,
                         step=100,
                         unit_of_measurement="W",
                         mode=selector.NumberSelectorMode.BOX,
@@ -457,7 +457,7 @@ class ExportMonitorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                         min=0,
-                        max=10000,
+                        max=5000,
                         step=100,
                         unit_of_measurement="W",
                         mode=selector.NumberSelectorMode.BOX,
@@ -596,7 +596,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                         min=0,
-                        max=10000,
+                        max=5000,
                         step=100,
                         unit_of_measurement="W",
                         mode=selector.NumberSelectorMode.BOX,

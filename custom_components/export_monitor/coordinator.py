@@ -62,7 +62,10 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_TARGET_EXPORT,
     DOMAIN,
+    SERVICE_START_CHARGE,
     SERVICE_START_DISCHARGE,
+    SERVICE_STOP_CHARGE,
+    SERVICE_STOP_DISCHARGE,
 )
 from .error_handler import (
     CircuitBreaker,
@@ -1186,6 +1189,17 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
 
             # Check for auto-discharge trigger
             enable_auto_discharge = config_data.get(CONF_ENABLE_AUTO_DISCHARGE, False)
+            if enable_auto_discharge and self._discharge_active and self._last_auto_discharge_window:
+                if not self._is_within_discharge_window(discharge_plan_today):
+                    _LOGGER.info("Auto-stopping discharge: outside planned window")
+                    self._last_auto_discharge_window = None
+                    self.hass.async_create_task(
+                        self.hass.services.async_call(
+                            DOMAIN,
+                            SERVICE_STOP_DISCHARGE,
+                            {},
+                        )
+                    )
             if enable_auto_discharge and discharge_plan_today:
                 await self._check_and_trigger_auto_discharge(
                     discharge_plan_today,
@@ -1199,6 +1213,17 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
 
             # Check for auto-charge trigger
             enable_auto_charge = config_data.get(CONF_ENABLE_AUTO_CHARGE, False)
+            if enable_auto_charge and self._charge_active and self._last_auto_charge_window:
+                if not self._is_within_charge_window(next_charge_session):
+                    _LOGGER.info("Auto-stopping charge: outside planned window")
+                    self._last_auto_charge_window = None
+                    self.hass.async_create_task(
+                        self.hass.services.async_call(
+                            DOMAIN,
+                            SERVICE_STOP_CHARGE,
+                            {},
+                        )
+                    )
             if enable_auto_charge and next_charge_session:
                 await self._check_and_trigger_auto_charge(
                     next_charge_session,
@@ -1395,9 +1420,10 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                 
                 # Check if we're within the window start +/- 5 minutes
                 time_until_start = (window_start - now_local).total_seconds() / 60
+                is_within_window = window_start <= now_local <= window_end
                 
                 # Trigger if we're within 5 minutes before start or already in the window
-                if -5 <= time_until_start <= 0 and not self._discharge_active:
+                if (-5 <= time_until_start <= 0 or is_within_window) and not self._discharge_active:
                     _LOGGER.info(
                         "Auto-discharge triggered for window %s - %s (%.3f kWh)",
                         window_start.strftime("%H:%M"),
@@ -1431,6 +1457,72 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
             except (ValueError, TypeError) as err:
                 _LOGGER.debug("Error parsing window times: %s", err)
                 continue
+
+    def _is_within_discharge_window(self, discharge_plan: list[dict]) -> bool:
+        """Check if current time is within any discharge plan window."""
+        import datetime
+
+        if not discharge_plan:
+            return False
+
+        now = datetime.datetime.now(datetime.timezone.utc)
+
+        for window in discharge_plan:
+            window_start_str = window.get("period_start") or window.get("from", "")
+            window_end_str = window.get("period_end") or window.get("to", "")
+
+            if not window_start_str or not window_end_str:
+                continue
+
+            try:
+                window_start = datetime.datetime.fromisoformat(window_start_str)
+                window_end = datetime.datetime.fromisoformat(window_end_str)
+            except (ValueError, TypeError):
+                continue
+
+            if window_start.tzinfo is None:
+                window_start = window_start.replace(tzinfo=datetime.timezone.utc)
+            if window_end.tzinfo is None:
+                window_end = window_end.replace(tzinfo=datetime.timezone.utc)
+
+            now_local = now.astimezone(window_start.tzinfo) if window_start.tzinfo else now
+            if window_start <= now_local <= window_end:
+                return True
+
+        return False
+
+    def _is_within_charge_window(self, charge_session: list[dict]) -> bool:
+        """Check if current time is within any charge plan window."""
+        import datetime
+
+        if not charge_session:
+            return False
+
+        now = datetime.datetime.now(datetime.timezone.utc)
+
+        for window in charge_session:
+            window_start_str = window.get("period_start", "")
+            window_end_str = window.get("period_end", "")
+
+            if not window_start_str or not window_end_str:
+                continue
+
+            try:
+                window_start = datetime.datetime.fromisoformat(window_start_str)
+                window_end = datetime.datetime.fromisoformat(window_end_str)
+            except (ValueError, TypeError):
+                continue
+
+            if window_start.tzinfo is None:
+                window_start = window_start.replace(tzinfo=datetime.timezone.utc)
+            if window_end.tzinfo is None:
+                window_end = window_end.replace(tzinfo=datetime.timezone.utc)
+
+            now_local = now.astimezone(window_start.tzinfo) if window_start.tzinfo else now
+            if window_start <= now_local <= window_end:
+                return True
+
+        return False
 
     async def _check_and_trigger_auto_charge(
         self,
@@ -1467,6 +1559,13 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                 # Parse window start time (timezone-aware)
                 window_start = datetime.fromisoformat(window_start_str)
                 window_end = datetime.fromisoformat(window_end_str)
+
+                if window_start.tzinfo is None:
+                    window_start = window_start.replace(tzinfo=timezone.utc)
+                if window_end.tzinfo is None:
+                    window_end = window_end.replace(tzinfo=timezone.utc)
+
+                now_local = now.astimezone(window_start.tzinfo) if window_start.tzinfo else now
                 
                 # Create a window identifier using the window's own date
                 window_date_str = window_start.strftime("%Y-%m-%d")
@@ -1482,10 +1581,11 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                     self._last_auto_charge_window = None
                 
                 # Check how many minutes remain until the window starts
-                time_until_start = (window_start - now).total_seconds() / 60
+                time_until_start = (window_start - now_local).total_seconds() / 60
+                is_within_window = window_start <= now_local <= window_end
                 
                 # Trigger if we're within 5 minutes before the window start
-                if 0 <= time_until_start <= 5 and not self._charge_active:
+                if (0 <= time_until_start <= 5 or is_within_window) and not self._charge_active:
                     _LOGGER.info(
                         "Auto-charge triggered for window %s - %s (%.3f kWh)",
                         window_start.strftime("%H:%M"),
@@ -1503,7 +1603,7 @@ class ExportMonitorCoordinator(DataUpdateCoordinator):
                     try:
                         await self.hass.services.async_call(
                             DOMAIN,
-                            "start_charge",
+                            SERVICE_START_CHARGE,
                         )
                         _LOGGER.info("Auto-charge service call executed")
                     except Exception as err:

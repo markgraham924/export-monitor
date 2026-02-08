@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.8] - 2026-02-08
+
+### Fixed
+- **Auto control enforcement**: Auto charge/discharge now starts when already inside a planned window and stops when outside any planned window to keep Alpha ESS controls aligned with the plan.
+- **Target export limits**: Target Export max reduced to 5000 W across the entity and config flows to match the intended 5 kW ceiling.
+
 ## [1.9.7] - 2026-02-08
 
 ### Fixed

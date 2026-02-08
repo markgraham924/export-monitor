@@ -89,7 +89,7 @@ class TargetExportNumber(ExportMonitorNumber):
     _attr_native_unit_of_measurement = UnitOfPower.WATT
     _attr_mode = NumberMode.BOX
     _attr_native_min_value = 0
-    _attr_native_max_value = 10000
+    _attr_native_max_value = 5000
     _attr_native_step = 100
 
     def __init__(
